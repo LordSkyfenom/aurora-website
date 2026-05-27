@@ -74,20 +74,16 @@ const ROLE_LEVEL = {
 // ============================================
 // 💾 ХРАНИЛИЩЕ ДАННЫХ (JSON файлы)
 // ============================================
-
-// Пути к файлам
 const DATA_DIR = path.join(__dirname, 'data');
 const NEWS_FILE = path.join(DATA_DIR, 'news.json');
 const CITIES_FILE = path.join(DATA_DIR, 'cities.json');
 const FRIENDS_FILE = path.join(DATA_DIR, 'friends.json');
 const FORUM_FILE = path.join(DATA_DIR, 'forum.json');
 
-// Создаём папку data если её нет
 if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR);
 }
 
-// Инициализация файлов с данными
 function initDataFile(file, defaultData) {
     if (!fs.existsSync(file)) {
         fs.writeFileSync(file, JSON.stringify(defaultData, null, 2));
@@ -99,7 +95,6 @@ initDataFile(CITIES_FILE, []);
 initDataFile(FRIENDS_FILE, { users: {}, groups: [] });
 initDataFile(FORUM_FILE, []);
 
-// Функции для работы с данными
 function readData(file) {
     const data = fs.readFileSync(file);
     return JSON.parse(data);
@@ -110,66 +105,83 @@ function writeData(file, data) {
 }
 
 // ============================================
-// 📝 MIDDLEWARE
+// 🛡️ MIDDLEWARE
 // ============================================
 app.use(express.json());
 app.use(express.static(__dirname));
 app.use(session({
-    secret: 'aurora-secret-key',
+    secret: 'aurora-secret-key-2024',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 1000 * 60 * 60 * 24 } // 24 часа
+    cookie: { 
+        secure: true,
+        httpOnly: true,
+        sameSite: 'strict',
+        maxAge: 1000 * 60 * 60 * 24
+    }
 }));
 
+// Middleware для проверки авторизации
+function checkAuth(req, res, next) {
+    if (req.session.userId) {
+        next();
+    } else {
+        res.status(401).send('Доступ запрещён. Войдите через Discord.');
+    }
+}
+
+// Middleware для проверки роли Supreme Admin
+function checkAdmin(req, res, next) {
+    if (req.session.userRole === 'SUPREME ADMINISTRATION') {
+        next();
+    } else {
+        res.status(403).send('Нет прав для этого действия.');
+    }
+}
+
 // ============================================
-// 🌐 СТРАНИЦЫ
+// 🌐 СТРАНИЦЫ (с проверкой авторизации)
 // ============================================
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.get('/news', (req, res) => {
+app.get('/news', checkAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'views', 'news.html'));
 });
 
-app.get('/cities', (req, res) => {
+app.get('/cities', checkAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'views', 'cities.html'));
 });
 
-app.get('/friends', (req, res) => {
+app.get('/friends', checkAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'views', 'friends.html'));
 });
 
-app.get('/forum', (req, res) => {
+app.get('/forum', checkAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'views', 'forum.html'));
 });
 
 // ============================================
 // 📰 API НОВОСТИ
 // ============================================
-
-// Получить все новости
 app.get('/api/news', (req, res) => {
     const news = readData(NEWS_FILE);
     res.json(news);
 });
 
-// Создать новость (только для Supreme Admin)
-app.post('/api/news', async (req, res) => {
+app.post('/api/news', checkAuth, checkAdmin, (req, res) => {
     const { title, content } = req.body;
-    const userId = req.session.userId;
-    const userRole = req.session.userRole;
-   
-    if (!userId || userRole !== 'SUPREME ADMINISTRATION') {
-        return res.status(403).json({ error: 'Нет прав' });
+    if (!title || !content) {
+        return res.status(400).json({ error: 'Заполните все поля' });
     }
-   
+    
     const news = readData(NEWS_FILE);
     const newNews = {
         id: Date.now(),
         title,
         content,
-        authorId: userId,
+        authorId: req.session.userId,
         authorName: req.session.username,
         createdAt: new Date().toISOString()
     };
@@ -178,14 +190,7 @@ app.post('/api/news', async (req, res) => {
     res.json({ success: true, news: newNews });
 });
 
-// Удалить новость (только для Supreme Admin)
-app.delete('/api/news/:id', async (req, res) => {
-    const userRole = req.session.userRole;
-   
-    if (userRole !== 'SUPREME ADMINISTRATION') {
-        return res.status(403).json({ error: 'Нет прав' });
-    }
-   
+app.delete('/api/news/:id', checkAuth, checkAdmin, (req, res) => {
     let news = readData(NEWS_FILE);
     news = news.filter(n => n.id != req.params.id);
     writeData(NEWS_FILE, news);
@@ -195,28 +200,24 @@ app.delete('/api/news/:id', async (req, res) => {
 // ============================================
 // 🏙️ API ГОРОДА
 // ============================================
-
 app.get('/api/cities', (req, res) => {
     const cities = readData(CITIES_FILE);
     res.json(cities);
 });
 
-app.post('/api/cities', (req, res) => {
+app.post('/api/cities', checkAuth, (req, res) => {
     const { name, description } = req.body;
-    const userId = req.session.userId;
-    const username = req.session.username;
-   
-    if (!userId || !name || !description) {
-        return res.status(400).json({ error: 'Недостаточно данных' });
+    if (!name || !description) {
+        return res.status(400).json({ error: 'Заполните все поля' });
     }
-   
+    
     const cities = readData(CITIES_FILE);
     const newCity = {
         id: Date.now(),
         name,
         description,
-        ownerId: userId,
-        ownerName: username,
+        ownerId: req.session.userId,
+        ownerName: req.session.username,
         createdAt: new Date().toISOString()
     };
     cities.push(newCity);
@@ -224,15 +225,14 @@ app.post('/api/cities', (req, res) => {
     res.json({ success: true, city: newCity });
 });
 
-app.delete('/api/cities/:id', (req, res) => {
-    const userId = req.session.userId;
+app.delete('/api/cities/:id', checkAuth, (req, res) => {
     let cities = readData(CITIES_FILE);
     const city = cities.find(c => c.id == req.params.id);
-   
-    if (!city || city.ownerId !== userId) {
+    
+    if (!city || city.ownerId !== req.session.userId) {
         return res.status(403).json({ error: 'Нет прав' });
     }
-   
+    
     cities = cities.filter(c => c.id != req.params.id);
     writeData(CITIES_FILE, cities);
     res.json({ success: true });
@@ -241,53 +241,52 @@ app.delete('/api/cities/:id', (req, res) => {
 // ============================================
 // 👥 API ДРУЗЬЯ
 // ============================================
-
-app.get('/api/friends/data', (req, res) => {
-    const userId = req.session.userId;
-    if (!userId) return res.json({ friends: [], messages: [], groups: [] });
-   
+app.get('/api/friends/data', checkAuth, (req, res) => {
     const data = readData(FRIENDS_FILE);
-    const userFriends = data.users[userId] || { friends: [], groups: [] };
+    const userFriends = data.users[req.session.userId] || { friends: [], messages: [] };
     const allMessages = userFriends.messages || [];
-   
+    
     res.json({
         friends: userFriends.friends || [],
         messages: allMessages,
-        groups: data.groups.filter(g => g.members.includes(userId))
+        groups: data.groups.filter(g => g.members.includes(req.session.userId))
     });
 });
 
-app.post('/api/friends/add', (req, res) => {
+app.post('/api/friends/add', checkAuth, (req, res) => {
     const { friendId, friendName } = req.body;
     const userId = req.session.userId;
-   
-    if (!userId) return res.status(401).json({ error: 'Не авторизован' });
-   
+    
+    if (!friendId) return res.status(400).json({ error: 'Укажите ID друга' });
+    
     const data = readData(FRIENDS_FILE);
-   
+    
     if (!data.users[userId]) {
         data.users[userId] = { friends: [], messages: [] };
     }
-   
+    
     if (!data.users[userId].friends.includes(friendId)) {
         data.users[userId].friends.push(friendId);
-        data.users[friendId] = data.users[friendId] || { friends: [], messages: [] };
+        
+        if (!data.users[friendId]) {
+            data.users[friendId] = { friends: [], messages: [] };
+        }
         if (!data.users[friendId].friends.includes(userId)) {
             data.users[friendId].friends.push(userId);
         }
         writeData(FRIENDS_FILE, data);
     }
-   
+    
     res.json({ success: true });
 });
 
-app.post('/api/friends/message', (req, res) => {
+app.post('/api/friends/message', checkAuth, (req, res) => {
     const { toId, message } = req.body;
     const userId = req.session.userId;
     const username = req.session.username;
-   
-    if (!userId || !message) return res.status(400).json({ error: 'Нет данных' });
-   
+    
+    if (!toId || !message) return res.status(400).json({ error: 'Нет данных' });
+    
     const data = readData(FRIENDS_FILE);
     const msg = {
         id: Date.now(),
@@ -297,15 +296,15 @@ app.post('/api/friends/message', (req, res) => {
         message,
         timestamp: new Date().toISOString()
     };
-   
+    
     if (!data.users[userId]) data.users[userId] = { friends: [], messages: [] };
     if (!data.users[userId].messages) data.users[userId].messages = [];
     data.users[userId].messages.push(msg);
-   
+    
     if (!data.users[toId]) data.users[toId] = { friends: [], messages: [] };
     if (!data.users[toId].messages) data.users[toId].messages = [];
     data.users[toId].messages.push(msg);
-   
+    
     writeData(FRIENDS_FILE, data);
     res.json({ success: true, message: msg });
 });
@@ -313,28 +312,24 @@ app.post('/api/friends/message', (req, res) => {
 // ============================================
 // 📝 API ФОРУМ
 // ============================================
-
 app.get('/api/forum', (req, res) => {
     const forum = readData(FORUM_FILE);
     res.json(forum);
 });
 
-app.post('/api/forum', (req, res) => {
+app.post('/api/forum', checkAuth, (req, res) => {
     const { title, content } = req.body;
-    const userId = req.session.userId;
-    const username = req.session.username;
-   
-    if (!userId || !title || !content) {
-        return res.status(400).json({ error: 'Недостаточно данных' });
+    if (!title || !content) {
+        return res.status(400).json({ error: 'Заполните все поля' });
     }
-   
+    
     const forum = readData(FORUM_FILE);
     const newPost = {
         id: Date.now(),
         title,
         content,
-        authorId: userId,
-        authorName: username,
+        authorId: req.session.userId,
+        authorName: req.session.username,
         createdAt: new Date().toISOString(),
         answers: []
     };
@@ -343,24 +338,20 @@ app.post('/api/forum', (req, res) => {
     res.json({ success: true, post: newPost });
 });
 
-app.post('/api/forum/:id/answer', (req, res) => {
+app.post('/api/forum/:id/answer', checkAuth, (req, res) => {
     const { content } = req.body;
-    const userId = req.session.userId;
-    const username = req.session.username;
     const postId = req.params.id;
-   
-    if (!userId || !content) {
-        return res.status(400).json({ error: 'Недостаточно данных' });
-    }
-   
+    
+    if (!content) return res.status(400).json({ error: 'Введите ответ' });
+    
     const forum = readData(FORUM_FILE);
     const post = forum.find(p => p.id == postId);
-   
+    
     if (post) {
         const answer = {
             id: Date.now(),
-            authorId: userId,
-            authorName: username,
+            authorId: req.session.userId,
+            authorName: req.session.username,
             content,
             createdAt: new Date().toISOString()
         };
@@ -373,9 +364,39 @@ app.post('/api/forum/:id/answer', (req, res) => {
 });
 
 // ============================================
-// 🔐 Discord OAuth2
+// 📊 API СТАТУС СЕРВЕРА
 // ============================================
+app.get('/api/server-status', async (req, res) => {
+    try {
+        const apiUrl = 'https://api.mcsrvstat.us/2/213.171.18.141:32803';
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch server status', online: false, players: { online: 0, max: 99 } });
+    }
+});
 
+// ============================================
+// 👤 API ПОЛЬЗОВАТЕЛЯ
+// ============================================
+app.get('/api/user', (req, res) => {
+    if (req.session.userId) {
+        res.json({
+            authenticated: true,
+            id: req.session.userId,
+            username: req.session.username,
+            role: req.session.userRole,
+            level: req.session.userLevel
+        });
+    } else {
+        res.json({ authenticated: false });
+    }
+});
+
+// ============================================
+// 🔐 DISCORD OAuth2
+// ============================================
 const agent = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
 
 async function fetchWithRetry(url, options, retries = 3) {
@@ -409,7 +430,7 @@ function getHighestRoleById(userRoleIds) {
 app.get('/auth/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('Нет кода');
-   
+    
     try {
         const tokenParams = new URLSearchParams();
         tokenParams.append('client_id', DISCORD_CLIENT_ID);
@@ -417,7 +438,7 @@ app.get('/auth/callback', async (req, res) => {
         tokenParams.append('grant_type', 'authorization_code');
         tokenParams.append('code', code);
         tokenParams.append('redirect_uri', REDIRECT_URI);
-       
+        
         const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -425,12 +446,12 @@ app.get('/auth/callback', async (req, res) => {
         });
         const tokenData = await tokenRes.json();
         const accessToken = tokenData.access_token;
-       
+        
         const userRes = await fetchWithRetry('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         const userData = await userRes.json();
-       
+        
         let userRoleIds = [];
         try {
             const memberRes = await fetchWithRetry(`https://discord.com/api/guilds/${YOUR_GUILD_ID}/members/${userData.id}`, {
@@ -441,15 +462,14 @@ app.get('/auth/callback', async (req, res) => {
         } catch (err) {
             console.log('Не удалось получить роли:', err.message);
         }
-       
+        
         const highestRole = getHighestRoleById(userRoleIds);
-       
-        // Сохраняем данные в сессию
+        
         req.session.userId = userData.id;
         req.session.username = userData.username;
         req.session.userRole = highestRole.name;
         req.session.userLevel = highestRole.level;
-       
+        
         const result = {
             id: userData.id,
             username: userData.username,
@@ -457,7 +477,7 @@ app.get('/auth/callback', async (req, res) => {
             displayRole: highestRole.displayName,
             level: highestRole.level
         };
-       
+        
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -498,7 +518,7 @@ app.get('/auth/callback', async (req, res) => {
             <body>
                 <div class="success-box">
                     <div class="spinner"></div>
-                    <div class="success" style="color:#2ecc2e; font-size:24px;">✅ Вход выполнен!</div>
+                    <div style="color:#2ecc2e; font-size:24px;">✅ Вход выполнен!</div>
                     <p>👤 ${userData.username}</p>
                     <p>🏷️ Роль: ${highestRole.displayName}</p>
                     <p>📊 Уровень: ${highestRole.level}</p>
@@ -517,32 +537,12 @@ app.get('/auth/callback', async (req, res) => {
     }
 });
 
-app.get('/api/server-status', async (req, res) => {
-    try {
-        const apiUrl = 'https://api.mcsrvstat.us/2/213.171.18.141:32803';
-        const response = await fetch(apiUrl);
-        const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch server status', online: false, players: { online: 0, max: 99 } });
-    }
-});
-
-app.get('/api/user', (req, res) => {
-    if (req.session.userId) {
-        res.json({
-            id: req.session.userId,
-            username: req.session.username,
-            role: req.session.userRole,
-            level: req.session.userLevel
-        });
-    } else {
-        res.json({ authenticated: false });
-    }
-});
-
+// ============================================
+// 🚀 ЗАПУСК
+// ============================================
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
+    console.log('='.repeat(50));
     console.log('🚀 Aurora Server запущен!');
     console.log(`📍 Порт: ${PORT}`);
     console.log('='.repeat(50));
