@@ -14,7 +14,7 @@ const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const YOUR_GUILD_ID = process.env.YOUR_GUILD_ID;
 
 // ⚠️ ЗАМЕНИ НА СВОЙ АДРЕС
-const REDIRECT_URI = 'https://ТВОЙ_САЙТ.onrender.com/auth/callback';
+const REDIRECT_URI = 'https://aurora-mc.onrender.com/auth/callback';
 
 // ============================================
 // 📋 ID РОЛЕЙ (по приоритету от высшей к низшей)
