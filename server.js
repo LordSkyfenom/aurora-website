@@ -13,7 +13,7 @@ const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const YOUR_GUILD_ID = process.env.YOUR_GUILD_ID;
 const BOT_TOKEN = process.env.BOT_TOKEN;  // 👈 ТОКЕН БОТА
-const REDIRECT_URI = 'https://ТВОЙ_САЙТ.onrender.com/auth/callback';
+const REDIRECT_URI = 'https://aurora-mc.onrender.com/auth/callback';
 
 // ============================================
 // 📋 ID РОЛЕЙ
