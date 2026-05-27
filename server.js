@@ -7,17 +7,19 @@ const https = require('https');
 const app = express();
 
 // ============================================
-// 🔒 ДАННЫЕ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ (.env)
+// 🔒 ДАННЫЕ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ
 // ============================================
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const YOUR_GUILD_ID = process.env.YOUR_GUILD_ID;
-const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:3001/auth/callback';
+
+// ⚠️ ЗДЕСЬ НУЖЕН ТВОЙ РЕАЛЬНЫЙ АДРЕС С RENDER
+const REDIRECT_URI = 'https://ТВОЙ_САЙТ.onrender.com/auth/callback';
 
 // ============================================
-// 📋 ID РОЛЕЙ (тоже из переменной окружения)
+// 📋 ID РОЛЕЙ
 // ============================================
-const ROLE_IDS = process.env.ROLE_IDS ? JSON.parse(process.env.ROLE_IDS) : {
+const ROLE_IDS = {
     'SUPREME ADMINISTRATION': '1508797925554126959',
     'ADMINISTRATION': '1508797941152878684',
     'MODERATION': '1508797937810145361',
@@ -119,7 +121,7 @@ function getMainRoleById(userRoleIds) {
 app.get('/auth/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('Нет кода');
-   
+    
     try {
         const tokenParams = new URLSearchParams();
         tokenParams.append('client_id', DISCORD_CLIENT_ID);
@@ -127,7 +129,7 @@ app.get('/auth/callback', async (req, res) => {
         tokenParams.append('grant_type', 'authorization_code');
         tokenParams.append('code', code);
         tokenParams.append('redirect_uri', REDIRECT_URI);
-       
+        
         const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -135,12 +137,12 @@ app.get('/auth/callback', async (req, res) => {
         });
         const tokenData = await tokenRes.json();
         const accessToken = tokenData.access_token;
-       
+        
         const userRes = await fetchWithRetry('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         const userData = await userRes.json();
-       
+        
         let userRoleIds = [];
         try {
             const memberRes = await fetchWithRetry(`https://discord.com/api/guilds/${YOUR_GUILD_ID}/members/${userData.id}`, {
@@ -149,13 +151,13 @@ app.get('/auth/callback', async (req, res) => {
             const memberData = await memberRes.json();
             userRoleIds = memberData.roles || [];
         } catch (err) {}
-       
+        
         const mainRole = getMainRoleById(userRoleIds);
         const result = {
             id: userData.id, username: userData.username, avatar: userData.avatar,
             displayRole: mainRole.displayName, level: mainRole.level, allRoleIds: userRoleIds
         };
-       
+        
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -185,5 +187,5 @@ app.get('/auth/callback', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log('🚀 Aurora Server запущен!');
-    console.log(`📍 http://localhost:${PORT}`);
+    console.log(`📍 Порт: ${PORT}`);
 });
