@@ -92,7 +92,7 @@ function initDataFile(file, defaultData) {
 
 initDataFile(NEWS_FILE, []);
 initDataFile(CITIES_FILE, []);
-initDataFile(FRIENDS_FILE, { users: {}, groups: [] });
+initDataFile(FRIENDS_FILE, { users: {} });
 initDataFile(FORUM_FILE, []);
 
 function readData(file) {
@@ -105,8 +105,10 @@ function writeData(file, data) {
 }
 
 // ============================================
-// 🛡️ MIDDLEWARE
+// 🛡️ MIDDLEWARE (для хостинга HTTPS)
 // ============================================
+app.set('trust proxy', 1); // Доверять прокси Render
+
 app.use(express.json());
 app.use(express.static(__dirname));
 app.use(session({
@@ -114,10 +116,10 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: { 
-        secure: true,
+        secure: true,        // Для HTTPS на Render
         httpOnly: true,
-        sameSite: 'strict',
-        maxAge: 1000 * 60 * 60 * 24
+        sameSite: 'lax',
+        maxAge: 1000 * 60 * 60 * 24 * 7 // 7 дней
     }
 }));
 
@@ -140,7 +142,7 @@ function checkAdmin(req, res, next) {
 }
 
 // ============================================
-// 🌐 СТРАНИЦЫ (с проверкой авторизации)
+// 🌐 СТРАНИЦЫ
 // ============================================
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -244,12 +246,10 @@ app.delete('/api/cities/:id', checkAuth, (req, res) => {
 app.get('/api/friends/data', checkAuth, (req, res) => {
     const data = readData(FRIENDS_FILE);
     const userFriends = data.users[req.session.userId] || { friends: [], messages: [] };
-    const allMessages = userFriends.messages || [];
     
     res.json({
         friends: userFriends.friends || [],
-        messages: allMessages,
-        groups: data.groups.filter(g => g.members.includes(req.session.userId))
+        messages: userFriends.messages || []
     });
 });
 
