@@ -42,151 +42,13 @@ const PRODUCT = {
 const orders = new Map();
 
 // ============================================
-// 🤖 TELEGRAM БОТ
+// 🤖 TELEGRAM БОТ (webhook mode — без конфликтов)
 // ============================================
 let bot = null;
 
 if (TELEGRAM_BOT_TOKEN) {
-    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    console.log('🤖 Telegram бот запущен');
-    
-    bot.onText(/\/start/, (msg) => {
-        const chatId = msg.chat.id;
-        bot.sendMessage(chatId, 
-            `🎮 Добро пожаловать в Aurora Shop!\n\n` +
-            `💰 Цена: ${PRODUCT.price}₽\n` +
-            `🎁 Бонусы:\n` +
-            `• Цветной ник на сервере\n` +
-            `• Цветной ник в Discord\n` +
-            `• Быстрые ответы от модерации\n\n` +
-            `🚀 Чтобы купить, отправь команду:\n` +
-            `/buy ваш_ник_в_minecraft`
-        );
-    });
-    
-    // /buy с ЮMoney
-    bot.onText(/\/buy (.+)/, async (msg, match) => {
-        const chatId = msg.chat.id;
-        const playerName = match[1].trim();
-        
-        if (!playerName) {
-            bot.sendMessage(chatId, '❌ Укажите ник игрока. Пример: /buy Steve');
-            return;
-        }
-        
-        const orderId = Date.now().toString();
-        orders.set(orderId, {
-            chatId,
-            playerName,
-            status: 'pending',
-            createdAt: new Date()
-        });
-        
-        const paymentUrl = `https://yoomoney.ru/quickpay/confirm.xml?receiver=${YOOMONEY_WALLET}&quickpay-form=shop&targets=Покупка+спонсора+для+${playerName}&sum=${PRODUCT.price}&paymentType=AC`;
-        
-        bot.sendMessage(chatId,
-            `💳 Заказ #${orderId}\n` +
-            `Для покупки спонсора для игрока *${playerName}*\n\n` +
-            `💰 Сумма: ${PRODUCT.price}₽\n\n` +
-            `🔗 Ссылка на оплату через ЮMoney:\n` +
-            `${paymentUrl}\n\n` +
-            `📌 После оплаты отправь команду:\n` +
-            `/confirm ${orderId}`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        if (ADMIN_CHAT_ID) {
-            bot.sendMessage(ADMIN_CHAT_ID, 
-                `🆕 Новая заявка #${orderId}\n👤 Игрок: ${playerName}`
-            );
-        }
-    });
-    
-    // /confirm
-    bot.onText(/\/confirm (.+)/, (msg, match) => {
-        const chatId = msg.chat.id;
-        const orderId = match[1].trim();
-        const order = orders.get(orderId);
-        
-        if (!order || order.status !== 'pending') {
-            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден или уже обработан`);
-            return;
-        }
-        
-        bot.sendMessage(chatId, `✅ Заявка #${orderId} отправлена на проверку. Ожидайте выдачи привилегий (до 5 минут).\nСпасибо за поддержку! ❤️`);
-        
-        if (ADMIN_CHAT_ID) {
-            bot.sendMessage(ADMIN_CHAT_ID,
-                `💸 Заказ #${orderId} ожидает подтверждения\n` +
-                `👤 Игрок: ${order.playerName}\n\n` +
-                `Проверьте платёж и выдайте привилегию командой:\n` +
-                `/grant ${order.playerName} ${orderId}`
-            );
-        }
-    });
-    
-    // /grant (только для админа)
-    bot.onText(/\/grant (.+) (.+)/, async (msg, match) => {
-        const chatId = msg.chat.id;
-        
-        if (chatId.toString() !== ADMIN_CHAT_ID) {
-            bot.sendMessage(chatId, '❌ Нет прав');
-            return;
-        }
-        
-        const playerName = match[1];
-        const orderId = match[2];
-        const order = orders.get(orderId);
-        
-        if (!order) {
-            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
-            return;
-        }
-        
-        try {
-            await sendRconCommands(playerName, PRODUCT.commands);
-            order.status = 'completed';
-            orders.set(orderId, order);
-            
-            bot.sendMessage(order.chatId, 
-                `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку!`,
-                { parse_mode: 'Markdown' }
-            );
-            bot.sendMessage(chatId, `✅ Привилегии выданы ${playerName} (заказ #${orderId})`);
-        } catch (error) {
-            bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
-        }
-    });
-    
-    // /status
-    bot.onText(/\/status (.+)/, (msg, match) => {
-        const chatId = msg.chat.id;
-        const orderId = match[1].trim();
-        const order = orders.get(orderId);
-        
-        if (!order) {
-            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
-        } else {
-            bot.sendMessage(chatId, 
-                `📊 Статус заказа #${orderId}\n` +
-                `👤 Игрок: ${order.playerName}\n` +
-                `📌 Статус: ${order.status === 'pending' ? '⏳ Ожидает подтверждения' : '✅ Выполнен'}`
-            );
-        }
-    });
-    
-    // /help
-    bot.onText(/\/help/, (msg) => {
-        const chatId = msg.chat.id;
-        bot.sendMessage(chatId,
-            `📋 Доступные команды:\n\n` +
-            `/start - Приветствие\n` +
-            `/buy ник - Оформить заказ\n` +
-            `/confirm номер - Подтвердить оплату\n` +
-            `/status номер - Статус заказа\n` +
-            `/help - Справка`
-        );
-    });
+    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+    console.log('🤖 Telegram бот создан (webhook mode)');
 }
 
 // ============================================
@@ -210,7 +72,7 @@ function sendRconCommands(playerName, commands) {
 }
 
 // ============================================
-// 📋 ID РОЛЕЙ (сокращённо для краткости)
+// 📋 ID РОЛЕЙ
 // ============================================
 const ROLE_IDS = {
     'SUPREME ADMINISTRATION': '1508797925554126959',
@@ -308,6 +170,148 @@ function checkAdmin(req, res, next) {
     if (req.session.userRole === 'SUPREME ADMINISTRATION') return next();
     res.status(403).json({ error: 'Нет прав' });
 }
+
+// ============================================
+// 🤖 TELEGRAM WEBHOOK МАРШРУТ
+// ============================================
+app.post('/webhook/telegram', express.json(), (req, res) => {
+    if (!bot) return res.status(200).send('OK');
+    
+    const msg = req.body.message;
+    if (!msg) return res.status(200).send('OK');
+    
+    const chatId = msg.chat.id;
+    const text = msg.text || '';
+    
+    console.log(`📝 Сообщение от ${chatId}: ${text}`);
+    
+    if (text === '/start') {
+        bot.sendMessage(chatId, 
+            `🎮 Добро пожаловать в Aurora Shop!\n\n` +
+            `💰 Цена: ${PRODUCT.price}₽\n` +
+            `🎁 Бонусы:\n` +
+            `• Цветной ник на сервере\n` +
+            `• Цветной ник в Discord\n` +
+            `• Быстрые ответы от модерации\n\n` +
+            `🚀 Чтобы купить, отправь команду:\n` +
+            `/buy ваш_ник_в_minecraft`
+        );
+    }
+    else if (text.startsWith('/buy')) {
+        const playerName = text.replace('/buy', '').trim();
+        
+        if (!playerName) {
+            bot.sendMessage(chatId, '❌ Укажите ник игрока. Пример: /buy Steve');
+            return;
+        }
+        
+        const orderId = Date.now().toString();
+        orders.set(orderId, {
+            chatId,
+            playerName,
+            status: 'pending',
+            createdAt: new Date()
+        });
+        
+        const paymentUrl = `https://yoomoney.ru/quickpay/confirm.xml?receiver=${YOOMONEY_WALLET}&quickpay-form=shop&targets=Покупка+спонсора+для+${playerName}&sum=${PRODUCT.price}&paymentType=AC`;
+        
+        bot.sendMessage(chatId,
+            `💳 Заказ #${orderId}\n` +
+            `Для покупки спонсора для игрока *${playerName}*\n\n` +
+            `💰 Сумма: ${PRODUCT.price}₽\n\n` +
+            `🔗 Ссылка на оплату через ЮMoney:\n` +
+            `${paymentUrl}\n\n` +
+            `📌 После оплаты отправь команду:\n` +
+            `/confirm ${orderId}`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        if (ADMIN_CHAT_ID) {
+            bot.sendMessage(ADMIN_CHAT_ID, 
+                `🆕 Новая заявка #${orderId}\n👤 Игрок: ${playerName}`
+            );
+        }
+    }
+    else if (text.startsWith('/confirm')) {
+        const orderId = text.replace('/confirm', '').trim();
+        const order = orders.get(orderId);
+        
+        if (!order || order.status !== 'pending') {
+            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден или уже обработан`);
+            return;
+        }
+        
+        bot.sendMessage(chatId, `✅ Заявка #${orderId} отправлена на проверку. Ожидайте выдачи привилегий (до 5 минут).`);
+        
+        if (ADMIN_CHAT_ID) {
+            bot.sendMessage(ADMIN_CHAT_ID,
+                `💸 Заказ #${orderId} ожидает подтверждения\n` +
+                `👤 Игрок: ${order.playerName}\n\n` +
+                `Проверьте платёж и выдайте привилегию командой:\n` +
+                `/grant ${order.playerName} ${orderId}`
+            );
+        }
+    }
+    else if (text.startsWith('/grant') && chatId.toString() === ADMIN_CHAT_ID) {
+        const parts = text.split(' ');
+        if (parts.length < 3) {
+            bot.sendMessage(chatId, `❌ Используйте: /grant игрок номер_заказа`);
+            return;
+        }
+        
+        const playerName = parts[1];
+        const orderId = parts[2];
+        const order = orders.get(orderId);
+        
+        if (!order) {
+            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
+            return;
+        }
+        
+        try {
+            await sendRconCommands(playerName, PRODUCT.commands);
+            order.status = 'completed';
+            orders.set(orderId, order);
+            
+            bot.sendMessage(order.chatId, 
+                `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку!`,
+                { parse_mode: 'Markdown' }
+            );
+            bot.sendMessage(chatId, `✅ Привилегии выданы ${playerName} (заказ #${orderId})`);
+        } catch (error) {
+            bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
+        }
+    }
+    else if (text.startsWith('/status')) {
+        const orderId = text.replace('/status', '').trim();
+        const order = orders.get(orderId);
+        
+        if (!order) {
+            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
+        } else {
+            bot.sendMessage(chatId, 
+                `📊 Статус заказа #${orderId}\n` +
+                `👤 Игрок: ${order.playerName}\n` +
+                `📌 Статус: ${order.status === 'pending' ? '⏳ Ожидает подтверждения' : '✅ Выполнен'}`
+            );
+        }
+    }
+    else if (text === '/help') {
+        bot.sendMessage(chatId,
+            `📋 Доступные команды:\n\n` +
+            `/start - Приветствие\n` +
+            `/buy ник - Оформить заказ\n` +
+            `/confirm номер - Подтвердить оплату\n` +
+            `/status номер - Статус заказа\n` +
+            `/help - Справка`
+        );
+    }
+    else {
+        bot.sendMessage(chatId, `❓ Неизвестная команда. Используй /help`);
+    }
+    
+    res.status(200).send('OK');
+});
 
 // ============================================
 // 🌐 API САЙТА
@@ -504,15 +508,27 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // ============================================
-// 🚀 ЗАПУСК
+// 🚀 ЗАПУСК И УСТАНОВКА WEBHOOK
 // ============================================
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+
+app.listen(PORT, async () => {
     console.log('='.repeat(50));
     console.log('🚀 Aurora Server запущен!');
     console.log(`📍 http://localhost:${PORT}`);
     console.log('='.repeat(50));
     console.log('🔌 RCON готов');
-    console.log(`🤖 Telegram бот: ${TELEGRAM_BOT_TOKEN ? '✅ запущен' : '❌ не найден'}`);
+    console.log(`🤖 Telegram бот: ${TELEGRAM_BOT_TOKEN ? '✅ создан' : '❌ не найден'}`);
     console.log(`💳 ЮMoney кошелёк: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
+    
+    // Устанавливаем webhook для Telegram
+    if (bot && TELEGRAM_BOT_TOKEN) {
+        const webhookUrl = `https://aurora-mc.onrender.com/webhook/telegram`;
+        try {
+            await bot.setWebHook(webhookUrl);
+            console.log(`✅ Webhook установлен: ${webhookUrl}`);
+        } catch (err) {
+            console.error(`❌ Ошибка webhook: ${err.message}`);
+        }
+    }
 });
