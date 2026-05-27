@@ -1,4 +1,4 @@
-// Получение онлайна через свой сервер
+// Minecraft сервер API для реального онлайна
 async function fetchServerStatus() {
     const playersOnlineElement = document.getElementById('playersOnline');
     const activeCountSpan = document.getElementById('activeCount');
@@ -12,17 +12,39 @@ async function fetchServerStatus() {
 
         if (data.online === true && data.players && typeof data.players.online === 'number') {
             const online = data.players.online;
-            const max = data.players.max || 50;
+            const max = data.players.max || 99;
             if (playersOnlineElement) playersOnlineElement.textContent = `${online}/${max}`;
             if (activeCountSpan) activeCountSpan.textContent = online;
         } else {
-            if (playersOnlineElement) playersOnlineElement.textContent = '0/50';
+            if (playersOnlineElement) playersOnlineElement.textContent = '0/99';
             if (activeCountSpan) activeCountSpan.textContent = '0';
         }
     } catch (error) {
         console.error('Ошибка получения статуса:', error);
-        if (playersOnlineElement) playersOnlineElement.textContent = '0/50';
+        if (playersOnlineElement) playersOnlineElement.textContent = '0/99';
         if (activeCountSpan) activeCountSpan.textContent = '0';
+    }
+}
+
+// Функция покупки спонсора
+async function buyProduct() {
+    const playerName = document.getElementById('playerName').value;
+    if (!playerName) {
+        alert('Введите ваш ник в Minecraft');
+        return;
+    }
+    
+    const res = await fetch('/api/create-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: 'sponsor', playerName })
+    });
+    const data = await res.json();
+    
+    if (data.success) {
+        window.location.href = data.paymentUrl;
+    } else {
+        alert('Ошибка создания платежа');
     }
 }
 
@@ -87,7 +109,6 @@ function openModal(content) {
 }
 if(closeInfoBtn) closeInfoBtn.onclick = () => { if(infoModal) infoModal.style.display = 'none'; };
 
-// Обработчики для ссылок в подвале
 const termsLink = document.getElementById('termsLink');
 if(termsLink) termsLink.onclick = (e) => { e.preventDefault(); openModal('<h3>📄 Пользовательское соглашение</h3><p>Текст соглашения...</p>'); };
 const privacyLink = document.getElementById('privacyLink');
@@ -97,7 +118,6 @@ if(faqLink) faqLink.onclick = (e) => { e.preventDefault(); openModal('<h3>❓ FA
 const supportLink = document.getElementById('supportLink');
 if(supportLink) supportLink.onclick = (e) => { e.preventDefault(); openModal('<h3>🛠️ Техподдержка</h3><p>Discord: ss_vindicator_ss</p>'); };
 
-// Профиль модалка
 const profileModal = document.getElementById('profileModal');
 const profileBtn = document.getElementById('profileBtn');
 const closeProfileBtn = document.getElementById('closeProfileModal');
