@@ -7,6 +7,7 @@ const session = require('express-session');
 const fs = require('fs');
 
 const Rcon = require('rcon');
+const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 
@@ -21,6 +22,7 @@ const REDIRECT_URI = 'https://aurora-mc.onrender.com/auth/callback';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
+const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET;
 
 const RCON_HOST = process.env.RCON_HOST;
 const RCON_PORT = parseInt(process.env.RCON_PORT) || 25575;
@@ -40,19 +42,16 @@ const PRODUCT = {
 const orders = new Map();
 
 // ============================================
-// 🤖 TELEGRAM БОТ (polling mode)
+// 🤖 TELEGRAM БОТ
 // ============================================
 let bot = null;
 
 if (TELEGRAM_BOT_TOKEN) {
-    const TelegramBot = require('node-telegram-bot-api');
     bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    console.log('🤖 Telegram бот запущен (polling mode)');
+    console.log('🤖 Telegram бот запущен');
     
-    // /start
     bot.onText(/\/start/, (msg) => {
         const chatId = msg.chat.id;
-        console.log(`📝 /start от ${chatId}`);
         bot.sendMessage(chatId, 
             `🎮 Добро пожаловать в Aurora Shop!\n\n` +
             `💰 Цена: ${PRODUCT.price}₽\n` +
@@ -65,12 +64,15 @@ if (TELEGRAM_BOT_TOKEN) {
         );
     });
     
-    // /buy
-    bot.onText(/\/buy (.+)/, (msg, match) => {
+    // /buy с ЮMoney
+    bot.onText(/\/buy (.+)/, async (msg, match) => {
         const chatId = msg.chat.id;
         const playerName = match[1].trim();
         
-        console.log(`💰 /buy от ${chatId} для игрока ${playerName}`);
+        if (!playerName) {
+            bot.sendMessage(chatId, '❌ Укажите ник игрока. Пример: /buy Steve');
+            return;
+        }
         
         const orderId = Date.now().toString();
         orders.set(orderId, {
@@ -80,21 +82,22 @@ if (TELEGRAM_BOT_TOKEN) {
             createdAt: new Date()
         });
         
+        const paymentUrl = `https://yoomoney.ru/quickpay/confirm.xml?receiver=${YOOMONEY_WALLET}&quickpay-form=shop&targets=Покупка+спонсора+для+${playerName}&sum=${PRODUCT.price}&paymentType=AC`;
+        
         bot.sendMessage(chatId,
             `💳 Заказ #${orderId}\n` +
             `Для покупки спонсора для игрока *${playerName}*\n\n` +
             `💰 Сумма: ${PRODUCT.price}₽\n\n` +
-            `💳 Реквизиты оплаты:\n` +
-            `• Карта: 1234 5678 9012 3456\n` +
-            `• Телефон: +7 900 123-45-67\n\n` +
-            `После оплаты отправь команду:\n` +
+            `🔗 Ссылка на оплату через ЮMoney:\n` +
+            `${paymentUrl}\n\n` +
+            `📌 После оплаты отправь команду:\n` +
             `/confirm ${orderId}`,
             { parse_mode: 'Markdown' }
         );
         
         if (ADMIN_CHAT_ID) {
             bot.sendMessage(ADMIN_CHAT_ID, 
-                `🆕 Новая заявка #${orderId}\n👤 Игрок: ${playerName}\n🆔 Chat ID: ${chatId}`
+                `🆕 Новая заявка #${orderId}\n👤 Игрок: ${playerName}`
             );
         }
     });
@@ -115,8 +118,7 @@ if (TELEGRAM_BOT_TOKEN) {
         if (ADMIN_CHAT_ID) {
             bot.sendMessage(ADMIN_CHAT_ID,
                 `💸 Заказ #${orderId} ожидает подтверждения\n` +
-                `👤 Игрок: ${order.playerName}\n` +
-                `🆔 Chat ID: ${chatId}\n\n` +
+                `👤 Игрок: ${order.playerName}\n\n` +
                 `Проверьте платёж и выдайте привилегию командой:\n` +
                 `/grant ${order.playerName} ${orderId}`
             );
@@ -128,7 +130,7 @@ if (TELEGRAM_BOT_TOKEN) {
         const chatId = msg.chat.id;
         
         if (chatId.toString() !== ADMIN_CHAT_ID) {
-            bot.sendMessage(chatId, '❌ Нет прав для этой команды');
+            bot.sendMessage(chatId, '❌ Нет прав');
             return;
         }
         
@@ -147,12 +149,12 @@ if (TELEGRAM_BOT_TOKEN) {
             orders.set(orderId, order);
             
             bot.sendMessage(order.chatId, 
-                `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку сервера Aurora!`,
+                `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку!`,
                 { parse_mode: 'Markdown' }
             );
             bot.sendMessage(chatId, `✅ Привилегии выданы ${playerName} (заказ #${orderId})`);
         } catch (error) {
-            bot.sendMessage(chatId, `❌ Ошибка выдачи: ${error.message}`);
+            bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
         }
     });
     
@@ -168,8 +170,7 @@ if (TELEGRAM_BOT_TOKEN) {
             bot.sendMessage(chatId, 
                 `📊 Статус заказа #${orderId}\n` +
                 `👤 Игрок: ${order.playerName}\n` +
-                `📌 Статус: ${order.status === 'pending' ? '⏳ Ожидает подтверждения' : '✅ Выполнен'}\n` +
-                `📅 Дата: ${order.createdAt.toLocaleString()}`
+                `📌 Статус: ${order.status === 'pending' ? '⏳ Ожидает подтверждения' : '✅ Выполнен'}`
             );
         }
     });
@@ -179,15 +180,13 @@ if (TELEGRAM_BOT_TOKEN) {
         const chatId = msg.chat.id;
         bot.sendMessage(chatId,
             `📋 Доступные команды:\n\n` +
-            `/start - Приветствие и информация\n` +
-            `/buy ник - Оформить заказ на покупку спонсора\n` +
-            `/confirm номер - Подтвердить оплату заказа\n` +
-            `/status номер - Проверить статус заказа\n` +
-            `/help - Показать эту справку`
+            `/start - Приветствие\n` +
+            `/buy ник - Оформить заказ\n` +
+            `/confirm номер - Подтвердить оплату\n` +
+            `/status номер - Статус заказа\n` +
+            `/help - Справка`
         );
     });
-} else {
-    console.log('❌ TELEGRAM_BOT_TOKEN не найден! Бот не запущен.');
 }
 
 // ============================================
@@ -211,7 +210,7 @@ function sendRconCommands(playerName, commands) {
 }
 
 // ============================================
-// 📋 ID РОЛЕЙ
+// 📋 ID РОЛЕЙ (сокращённо для краткости)
 // ============================================
 const ROLE_IDS = {
     'SUPREME ADMINISTRATION': '1508797925554126959',
@@ -515,5 +514,5 @@ app.listen(PORT, () => {
     console.log('='.repeat(50));
     console.log('🔌 RCON готов');
     console.log(`🤖 Telegram бот: ${TELEGRAM_BOT_TOKEN ? '✅ запущен' : '❌ не найден'}`);
-    console.log('💳 Кнопка покупки ведёт в Telegram: @Auroramcp_bot');
+    console.log(`💳 ЮMoney кошелёк: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
 });
