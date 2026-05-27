@@ -13,11 +13,11 @@ const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const YOUR_GUILD_ID = process.env.YOUR_GUILD_ID;
 
-// ⚠️ ЗДЕСЬ НУЖЕН ТВОЙ РЕАЛЬНЫЙ АДРЕС С RENDER
-const REDIRECT_URI = 'https://aurora-mc.onrender.com/auth/callback';
+// ⚠️ ЗАМЕНИ НА СВОЙ АДРЕС
+const REDIRECT_URI = 'https://ТВОЙ_САЙТ.onrender.com/auth/callback';
 
 // ============================================
-// 📋 ID РОЛЕЙ
+// 📋 ID РОЛЕЙ (по приоритету от высшей к низшей)
 // ============================================
 const ROLE_IDS = {
     'SUPREME ADMINISTRATION': '1508797925554126959',
@@ -34,12 +34,23 @@ const ROLE_IDS = {
     'beginner': '1508183843910193303'
 };
 
+// ПОРЯДОК ПРИОРИТЕТА (от высшей к низшей)
 const ROLE_PRIORITY = [
-    'SUPREME ADMINISTRATION', 'ADMINISTRATION', 'MODERATION', 'HEAD OF DISCORD',
-    'HEAD OF MEDIA', 'COMPOSITION MONITOR', 'COMPOSITION OF AURORA', 'MEDIA',
-    'SPONSOR', 'ADVERTISING MANAGER', 'HALLWAY', 'beginner'
+    'SUPREME ADMINISTRATION',
+    'ADMINISTRATION',
+    'MODERATION',
+    'HEAD OF DISCORD',
+    'HEAD OF MEDIA',
+    'COMPOSITION MONITOR',
+    'COMPOSITION OF AURORA',
+    'MEDIA',
+    'SPONSOR',
+    'ADVERTISING MANAGER',
+    'HALLWAY',
+    'beginner'
 ];
 
+// Отображение ролей
 const ROLE_DISPLAY = {
     'SUPREME ADMINISTRATION': '👑 Supreme Administration',
     'ADMINISTRATION': '⭐ Administration',
@@ -55,6 +66,7 @@ const ROLE_DISPLAY = {
     'beginner': '🌱 Beginner'
 };
 
+// Уровни для ролей
 const ROLE_LEVEL = {
     'SUPREME ADMINISTRATION': '👑 Легендарный',
     'ADMINISTRATION': '⭐ Элитный',
@@ -108,14 +120,27 @@ app.get('/auth/discord', (req, res) => {
     res.redirect(url);
 });
 
-function getMainRoleById(userRoleIds) {
-    for (const priorityRole of ROLE_PRIORITY) {
-        const roleId = ROLE_IDS[priorityRole];
+// Функция определения самой высокой роли
+function getHighestRoleById(userRoleIds) {
+    // Проходим по ролям в порядке приоритета (от высшей к низшей)
+    for (const roleName of ROLE_PRIORITY) {
+        const roleId = ROLE_IDS[roleName];
         if (roleId && userRoleIds.includes(roleId)) {
-            return { name: priorityRole, displayName: ROLE_DISPLAY[priorityRole], level: ROLE_LEVEL[priorityRole] };
+            console.log(`🏆 Найдена роль: ${roleName} (ID: ${roleId})`);
+            return {
+                name: roleName,
+                displayName: ROLE_DISPLAY[roleName],
+                level: ROLE_LEVEL[roleName]
+            };
         }
     }
-    return { name: 'beginner', displayName: '🌱 Beginner', level: '🌱 Новичок' };
+    // Если ни одна роль не найдена — новичок
+    console.log('🌱 Роли не найдены, назначена роль beginner');
+    return {
+        name: 'beginner',
+        displayName: '🌱 Beginner',
+        level: '🌱 Новичок'
+    };
 }
 
 app.get('/auth/callback', async (req, res) => {
@@ -123,6 +148,8 @@ app.get('/auth/callback', async (req, res) => {
     if (!code) return res.status(400).send('Нет кода');
     
     try {
+        console.log('1️⃣ Обмен кода на токен...');
+        
         const tokenParams = new URLSearchParams();
         tokenParams.append('client_id', DISCORD_CLIENT_ID);
         tokenParams.append('client_secret', DISCORD_CLIENT_SECRET);
@@ -138,40 +165,87 @@ app.get('/auth/callback', async (req, res) => {
         const tokenData = await tokenRes.json();
         const accessToken = tokenData.access_token;
         
+        console.log('2️⃣ Получение данных пользователя...');
         const userRes = await fetchWithRetry('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         const userData = await userRes.json();
         
+        console.log(`3️⃣ Пользователь: ${userData.username}`);
+        
         let userRoleIds = [];
         try {
+            console.log('4️⃣ Получение ролей пользователя...');
             const memberRes = await fetchWithRetry(`https://discord.com/api/guilds/${YOUR_GUILD_ID}/members/${userData.id}`, {
                 headers: { Authorization: `Bearer ${accessToken}` }
             });
             const memberData = await memberRes.json();
             userRoleIds = memberData.roles || [];
-        } catch (err) {}
+            console.log('📋 Все ID ролей пользователя:', userRoleIds);
+        } catch (err) {
+            console.log('⚠️ Не удалось получить роли:', err.message);
+        }
         
-        const mainRole = getMainRoleById(userRoleIds);
+        // Определяем самую высокую роль
+        const highestRole = getHighestRoleById(userRoleIds);
+        console.log(`🏆 Самая высокая роль: ${highestRole.displayName} (${highestRole.level})`);
+        
         const result = {
-            id: userData.id, username: userData.username, avatar: userData.avatar,
-            displayRole: mainRole.displayName, level: mainRole.level, allRoleIds: userRoleIds
+            id: userData.id,
+            username: userData.username,
+            avatar: userData.avatar,
+            displayRole: highestRole.displayName,
+            level: highestRole.level,
+            allRoleIds: userRoleIds
         };
         
         res.send(`
             <!DOCTYPE html>
             <html>
-            <head><title>Авторизация Aurora</title></head>
-            <body style="background:#1a1d24; color:white; font-family:system-ui; text-align:center; padding-top:100px;">
-                <div style="background:#20232b; padding:40px; border-radius:24px; max-width:400px; margin:0 auto;">
-                    <div style="width:40px; height:40px; border:3px solid #2ecc2e; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin:20px auto;"></div>
-                    <div style="color:#2ecc2e; font-size:24px;">✅ Вход выполнен!</div>
+            <head>
+                <title>Авторизация Aurora</title>
+                <style>
+                    body {
+                        background: #1a1d24;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        font-family: system-ui;
+                        color: white;
+                        margin: 0;
+                    }
+                    .success-box {
+                        text-align: center;
+                        background: #20232b;
+                        padding: 40px;
+                        border-radius: 24px;
+                        border: 1px solid #2ecc2e;
+                    }
+                    .spinner {
+                        width: 40px;
+                        height: 40px;
+                        border: 3px solid #2ecc2e;
+                        border-top-color: transparent;
+                        border-radius: 50%;
+                        animation: spin 0.8s linear infinite;
+                        margin: 20px auto;
+                    }
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
+                    }
+                    .success { color: #2ecc2e; font-size: 24px; }
+                </style>
+            </head>
+            <body>
+                <div class="success-box">
+                    <div class="spinner"></div>
+                    <div class="success">✅ Вход выполнен!</div>
                     <p>👤 ${userData.username}</p>
-                    <p>🏷️ Роль: ${mainRole.displayName}</p>
-                    <p>📊 Уровень: ${mainRole.level}</p>
+                    <p>🏷️ Роль: ${highestRole.displayName}</p>
+                    <p>📊 Уровень: ${highestRole.level}</p>
                     <p>🔄 Перенаправление...</p>
                 </div>
-                <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
                 <script>
                     localStorage.setItem('aurora_user', '${JSON.stringify(result).replace(/'/g, "\\'")}');
                     setTimeout(() => { window.location.href = '/'; }, 1500);
@@ -179,13 +253,29 @@ app.get('/auth/callback', async (req, res) => {
             </body>
             </html>
         `);
+        
     } catch (error) {
-        res.status(500).send('Ошибка авторизации');
+        console.error('❌ Ошибка:', error);
+        res.status(500).send(`
+            <!DOCTYPE html>
+            <html>
+            <head><title>Ошибка авторизации</title></head>
+            <body style="background:#1a1d24; color:white; font-family:system-ui; text-align:center; padding-top:100px;">
+                <div style="background:#20232b; padding:40px; border-radius:24px; max-width:500px; margin:0 auto;">
+                    <h2 style="color:#ff4444;">❌ Ошибка авторизации</h2>
+                    <p>${error.message}</p>
+                    <a href="/" style="color:#2ecc2e;">Вернуться на главную</a>
+                </div>
+            </body>
+            </html>
+        `);
     }
 });
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
+    console.log('='.repeat(50));
     console.log('🚀 Aurora Server запущен!');
     console.log(`📍 Порт: ${PORT}`);
+    console.log('='.repeat(50));
 });
