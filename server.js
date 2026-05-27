@@ -37,6 +37,9 @@ const PRODUCT = {
     ]
 };
 
+// Хранилище заказов
+const orders = new Map();
+
 // ============================================
 // 📋 ID РОЛЕЙ
 // ============================================
@@ -135,107 +138,12 @@ function sendRconCommands(playerName, commands) {
 }
 
 // ============================================
-// 🤖 TELEGRAM БОТ
+// 🤖 TELEGRAM БОТ (Webhook режим)
 // ============================================
-const orders = new Map();
 let bot;
-
 if (TELEGRAM_BOT_TOKEN) {
-    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    console.log('🤖 Telegram бот запущен');
-    
-    bot.onText(/\/start/, (msg) => {
-        const chatId = msg.chat.id;
-        bot.sendMessage(chatId, 
-            `🎮 Добро пожаловать в Aurora Shop!\n\n` +
-            `💰 Цена: ${PRODUCT.price}₽\n` +
-            `🎁 Бонусы:\n` +
-            `• Цветной ник на сервере\n` +
-            `• Цветной ник в Discord\n` +
-            `• Быстрые ответы от модерации\n\n` +
-            `🚀 Чтобы купить, отправь команду:\n` +
-            `/buy ваш_ник_в_minecraft`
-        );
-    });
-    
-    bot.onText(/\/buy (.+)/, async (msg, match) => {
-        const chatId = msg.chat.id;
-        const playerName = match[1].trim();
-        
-        const orderId = Date.now().toString();
-        orders.set(orderId, {
-            chatId,
-            playerName,
-            status: 'pending',
-            createdAt: new Date()
-        });
-        
-        bot.sendMessage(chatId,
-            `💳 Для покупки спонсора для игрока *${playerName}*\n\n` +
-            `Сумма: ${PRODUCT.price}₽\n\n` +
-            `💰 Реквизиты оплаты:\n` +
-            `• Карта: 1234 5678 9012 3456\n` +
-            `• Телефон: +7 900 123-45-67\n\n` +
-            `После оплаты отправь команду:\n` +
-            `/confirm ${orderId}`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        if (ADMIN_CHAT_ID) {
-            bot.sendMessage(ADMIN_CHAT_ID, 
-                `🆕 Новая заявка #${orderId}\n👤 Игрок: ${playerName}`
-            );
-        }
-    });
-    
-    bot.onText(/\/confirm (.+)/, async (msg, match) => {
-        const chatId = msg.chat.id;
-        const orderId = match[1].trim();
-        const order = orders.get(orderId);
-        
-        if (!order || order.status !== 'pending') {
-            return bot.sendMessage(chatId, '❌ Заказ не найден или уже обработан');
-        }
-        
-        if (ADMIN_CHAT_ID) {
-            bot.sendMessage(ADMIN_CHAT_ID,
-                `💸 Заказ #${orderId} ожидает подтверждения\n👤 Игрок: ${order.playerName}\n\n` +
-                `Выдайте привилегию командой:\n/grant ${order.playerName} ${orderId}`
-            );
-        }
-        
-        bot.sendMessage(chatId, `✅ Заявка отправлена на проверку. Ожидайте выдачи (до 5 минут).`);
-    });
-    
-    bot.onText(/\/grant (.+) (.+)/, async (msg, match) => {
-        const chatId = msg.chat.id;
-        
-        if (chatId.toString() !== ADMIN_CHAT_ID) {
-            return bot.sendMessage(chatId, '❌ Нет прав');
-        }
-        
-        const playerName = match[1];
-        const orderId = match[2];
-        const order = orders.get(orderId);
-        
-        if (!order) {
-            return bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
-        }
-        
-        try {
-            await sendRconCommands(playerName, PRODUCT.commands);
-            order.status = 'completed';
-            orders.set(orderId, order);
-            
-            bot.sendMessage(order.chatId, 
-                `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку!`,
-                { parse_mode: 'Markdown' }
-            );
-            bot.sendMessage(chatId, `✅ Привилегии выданы ${playerName}`);
-        } catch (error) {
-            bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
-        }
-    });
+    bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
+    console.log('🤖 Telegram бот создан (webhook режим)');
 }
 
 // ============================================
@@ -260,6 +168,147 @@ function checkAdmin(req, res, next) {
     if (req.session.userRole === 'SUPREME ADMINISTRATION') return next();
     res.status(403).json({ error: 'Нет прав' });
 }
+
+// ============================================
+// 🤖 TELEGRAM WEBHOOK
+// ============================================
+app.post('/webhook/telegram', express.json(), (req, res) => {
+    console.log('📥 Получен webhook от Telegram:', req.body);
+    
+    if (!bot) {
+        console.log('❌ Бот не инициализирован');
+        return res.status(200).send('OK');
+    }
+    
+    const msg = req.body.message;
+    if (!msg) {
+        console.log('⚠️ Нет сообщения в webhook');
+        return res.status(200).send('OK');
+    }
+    
+    const chatId = msg.chat.id;
+    const text = msg.text || '';
+    
+    console.log(`📝 Сообщение от ${chatId}: ${text}`);
+    
+    if (text === '/start') {
+        bot.sendMessage(chatId, 
+            `🎮 Добро пожаловать в Aurora Shop!\n\n` +
+            `💰 Цена: ${PRODUCT.price}₽\n` +
+            `🎁 Бонусы:\n` +
+            `• Цветной ник на сервере\n` +
+            `• Цветной ник в Discord\n` +
+            `• Быстрые ответы от модерации\n\n` +
+            `🚀 Чтобы купить, отправь команду:\n` +
+            `/buy ваш_ник_в_minecraft`
+        );
+    } 
+    else if (text.startsWith('/buy')) {
+        const playerName = text.replace('/buy', '').trim();
+        
+        if (!playerName) {
+            bot.sendMessage(chatId, `❌ Укажите ник игрока. Пример: /buy Steve`);
+            return;
+        }
+        
+        const orderId = Date.now().toString();
+        orders.set(orderId, {
+            chatId,
+            playerName,
+            status: 'pending',
+            createdAt: new Date()
+        });
+        
+        bot.sendMessage(chatId,
+            `💳 Заказ #${orderId}\n` +
+            `Для покупки спонсора для игрока *${playerName}*\n\n` +
+            `💰 Сумма: ${PRODUCT.price}₽\n\n` +
+            `💳 Реквизиты оплаты:\n` +
+            `• Карта: 1234 5678 9012 3456\n` +
+            `• Телефон: +7 900 123-45-67\n\n` +
+            `После оплаты отправь команду:\n` +
+            `/confirm ${orderId}`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        if (ADMIN_CHAT_ID) {
+            bot.sendMessage(ADMIN_CHAT_ID, 
+                `🆕 Новая заявка #${orderId}\n👤 Игрок: ${playerName}\n🆔 Chat ID: ${chatId}`
+            );
+        }
+    }
+    else if (text.startsWith('/confirm')) {
+        const orderId = text.replace('/confirm', '').trim();
+        const order = orders.get(orderId);
+        
+        if (!order || order.status !== 'pending') {
+            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден или уже обработан`);
+            return;
+        }
+        
+        bot.sendMessage(chatId, `✅ Заявка #${orderId} отправлена на проверку. Ожидайте выдачи привилегий (до 5 минут).\nСпасибо за поддержку! ❤️`);
+        
+        if (ADMIN_CHAT_ID) {
+            bot.sendMessage(ADMIN_CHAT_ID,
+                `💸 Заказ #${orderId} ожидает подтверждения\n` +
+                `👤 Игрок: ${order.playerName}\n` +
+                `🆔 Chat ID: ${chatId}\n\n` +
+                `Проверьте платёж и выдайте привилегию командой:\n` +
+                `/grant ${order.playerName} ${orderId}`
+            );
+        }
+    }
+    else if (text.startsWith('/grant') && chatId.toString() === ADMIN_CHAT_ID) {
+        const parts = text.split(' ');
+        if (parts.length < 3) {
+            bot.sendMessage(chatId, `❌ Используйте: /grant игрок номер_заказа`);
+            return;
+        }
+        
+        const playerName = parts[1];
+        const orderId = parts[2];
+        const order = orders.get(orderId);
+        
+        if (!order) {
+            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
+            return;
+        }
+        
+        try {
+            await sendRconCommands(playerName, PRODUCT.commands);
+            order.status = 'completed';
+            orders.set(orderId, order);
+            
+            bot.sendMessage(order.chatId, 
+                `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку сервера Aurora!`,
+                { parse_mode: 'Markdown' }
+            );
+            bot.sendMessage(chatId, `✅ Привилегии выданы ${playerName} (заказ #${orderId})`);
+        } catch (error) {
+            bot.sendMessage(chatId, `❌ Ошибка выдачи: ${error.message}`);
+        }
+    }
+    else if (text.startsWith('/status')) {
+        const orderId = text.replace('/status', '').trim();
+        const order = orders.get(orderId);
+        
+        if (!order) {
+            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
+        } else {
+            bot.sendMessage(chatId, 
+                `📊 Статус заказа #${orderId}\n` +
+                `👤 Игрок: ${order.playerName}\n` +
+                `📌 Статус: ${order.status === 'pending' ? '⏳ Ожидает подтверждения' : '✅ Выполнен'}\n` +
+                `📅 Дата: ${order.createdAt.toLocaleString()}`
+            );
+        }
+    }
+    else {
+        bot.sendMessage(chatId, `❓ Неизвестная команда.\n\nДоступные команды:\n/start - Приветствие\n/buy ник - Купить спонсора\n/status номер - Проверить статус\n/confirm номер - Подтвердить оплату`);
+    }
+    
+    res.status(200).send('OK');
+});
 
 // ============================================
 // 🌐 API САЙТА
@@ -457,14 +506,27 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // ============================================
-// 🚀 ЗАПУСК
+// 🚀 ЗАПУСК И УСТАНОВКА WEBHOOK
 // ============================================
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+
+app.listen(PORT, async () => {
     console.log('='.repeat(50));
     console.log('🚀 Aurora Server запущен!');
     console.log(`📍 http://localhost:${PORT}`);
     console.log('='.repeat(50));
-    console.log('🤖 Telegram бот готов');
     console.log('🔌 RCON готов');
+    console.log('🤖 Telegram бот в режиме webhook');
+    
+    // Устанавливаем webhook для Telegram
+    if (bot && TELEGRAM_BOT_TOKEN) {
+        const webhookUrl = `https://aurora-mc.onrender.com/webhook/telegram`;
+        try {
+            const result = await bot.setWebHook(webhookUrl);
+            console.log(`✅ Webhook установлен: ${webhookUrl}`);
+            console.log(`📡 Результат: ${JSON.stringify(result)}`);
+        } catch (err) {
+            console.error(`❌ Ошибка установки webhook: ${err.message}`);
+        }
+    }
 });
