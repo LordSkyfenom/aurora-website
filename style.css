@@ -527,6 +527,7 @@ footer {
     font-weight: 500;
 }
 
+/* Модальные окна */
 .modal {
     display: none;
     position: fixed;
@@ -595,20 +596,7 @@ footer {
     line-height: 1.6;
 }
 
-.modal-content h4 {
-    color: #2ecc2e;
-    margin: 20px 0 10px 0;
-}
-
-.modal-content ul {
-    margin-left: 20px;
-    color: #cbd0d6;
-}
-
-.modal-content li {
-    margin: 8px 0;
-}
-
+/* Профиль */
 .user-avatar {
     width: 80px;
     height: 80px;
@@ -623,6 +611,32 @@ footer {
     width: 100%;
     height: 100%;
     object-fit: cover;
+}
+
+/* Ссылки в профиле */
+.profile-links {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 20px 0;
+}
+
+.profile-link {
+    background: #2a2f38;
+    color: #cbd0d6;
+    text-decoration: none;
+    padding: 10px 16px;
+    border-radius: 40px;
+    text-align: center;
+    transition: all 0.2s;
+    border: 1px solid #3d434d;
+}
+
+.profile-link:hover {
+    background: #2ecc2e;
+    color: #1a1d24;
+    border-color: #2ecc2e;
+    transform: translateX(5px);
 }
 
 .login-btn, .logout-btn {
@@ -653,52 +667,58 @@ footer {
     background: #b91c1c;
 }
 
+/* Адаптив */
 @media (max-width: 768px) {
     .container {
         padding: 0 16px;
     }
-   
+    
     .nav-center {
         gap: 20px;
     }
-   
+    
     .nav-link {
         font-size: 0.85rem;
     }
-   
+    
     .server-title {
         font-size: 2.5rem;
     }
-   
+    
     .sponsor-badge {
-        font-size: 1.2rem;
+        font-size: 1rem;
     }
-   
+    
     .sponsor-title {
         font-size: 1rem;
     }
-   
+    
     .steps-grid {
         grid-template-columns: 1fr;
     }
-   
+    
     .rules-category {
         padding: 20px;
     }
-   
+    
     .rules-category h3 {
         font-size: 1.2rem;
     }
-   
+    
     .footer-links {
         gap: 16px;
     }
-   
+    
     .modal-large {
         width: 95%;
     }
+    
+    .profile-links {
+        gap: 8px;
+    }
 }
 
+/* Скроллбар */
 ::-webkit-scrollbar {
     width: 8px;
 }
