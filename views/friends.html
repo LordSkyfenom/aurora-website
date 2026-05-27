@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Друзья - Aurora</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .container-friends { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+        .friends-grid { display: flex; gap: 20px; flex-wrap: wrap; }
+        .friends-list, .chat-area { background: #20232b; border-radius: 16px; padding: 20px; flex: 1; }
+        .friend-item { padding: 10px; border-bottom: 1px solid #3d434d; cursor: pointer; }
+        .friend-item:hover { background: #2a2f38; }
+        .messages { height: 300px; overflow-y: auto; margin-bottom: 10px; }
+        .message { padding: 8px; margin: 5px 0; background: #1a1d24; border-radius: 8px; }
+        .message-own { background: #2ecc2e20; border-left: 2px solid #2ecc2e; }
+        .chat-input { display: flex; gap: 10px; }
+        .chat-input input { flex: 1; padding: 10px; background: #1a1d24; border: 1px solid #3d434d; color: white; border-radius: 8px; }
+        .chat-input button { background: #2ecc2e; color: #1a1d24; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
+        .add-friend { margin-bottom: 20px; display: flex; gap: 10px; }
+        .add-friend input { flex: 1; padding: 10px; background: #1a1d24; border: 1px solid #3d434d; color: white; border-radius: 8px; }
+        .back-link { display: inline-block; margin-bottom: 20px; color: #2ecc2e; text-decoration: none; }
+        .friend-active { background: #2ecc2e20; border-left: 3px solid #2ecc2e; }
+    </style>
+</head>
+<body>
+    <div class="container-friends">
+        <a href="/" class="back-link">← На главную</a>
+        <h1 style="color:#2ecc2e;">👥 Друзья</h1>
+       
+        <div class="add-friend">
+            <input type="text" id="friendId" placeholder="ID друга (из Discord)">
+            <input type="text" id="friendName" placeholder="Имя друга">
+            <button onclick="addFriend()">➕ Добавить друга</button>
+        </div>
+       
+        <div class="friends-grid">
+            <div class="friends-list">
+                <h3>📋 Мои друзья</h3>
+                <div id="friendsList"></div>
+            </div>
+            <div class="chat-area">
+                <h3 id="chatTitle">💬 Чат</h3>
+                <div id="messages" class="messages"></div>
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="Сообщение...">
+                    <button onclick="sendMessage()">Отправить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+   
+    <script>
+        let currentFriend = null;
+        let currentUserId = null;
+        let currentUserName = null;
+        let allMessages = [];
+       
+        async function checkUser() {
+            const res = await fetch('/api/user');
+            const data = await res.json();
+            if (data.authenticated) {
+                currentUserId = data.id;
+                currentUserName = data.username;
+            }
+        }
+       
+        async function loadFriends() {
+            const res = await fetch('/api/friends/data');
+            const data = await res.json();
+            const container = document.getElementById('friendsList');
+            container.innerHTML = (data.friends || []).map(f => `
+                <div class="friend-item ${currentFriend === f ? 'friend-active' : ''}" onclick="selectFriend('${f}')">
+                    👤 ${f}
+                </div>
+            `).join('');
+            allMessages = data.messages || [];
+            if (currentFriend) loadMessages();
+        }
+       
+        async function addFriend() {
+            const friendId = document.getElementById('friendId').value;
+            const friendName = document.getElementById('friendName').value;
+            if (!friendId) return alert('Введите ID друга');
+           
+            await fetch('/api/friends/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ friendId, friendName })
+            });
+            document.getElementById('friendId').value = '';
+            document.getElementById('friendName').value = '';
+            loadFriends();
+        }
+       
+        function selectFriend(friendId) {
+            currentFriend = friendId;
+            document.getElementById('chatTitle').innerHTML = `💬 Чат с ${friendId}`;
+            loadMessages();
+            loadFriends();
+        }
+       
+        function loadMessages() {
+            const messagesForFriend = allMessages.filter(m =>
+                (m.from === currentUserId && m.to === currentFriend) ||
+                (m.from === currentFriend && m.to === currentUserId)
+            );
+            const container = document.getElementById('messages');
+            container.innerHTML = messagesForFriend.map(m => `
+                <div class="message ${m.from === currentUserId ? 'message-own' : ''}">
+                    <strong>${m.fromName}:</strong> ${escapeHtml(m.message)}<br>
+                    <small style="color:#6b7482;">${new Date(m.timestamp).toLocaleTimeString()}</small>
+                </div>
+            `).join('');
+            container.scrollTop = container.scrollHeight;
+        }
+       
+        async function sendMessage() {
+            const message = document.getElementById('messageInput').value;
+            if (!message || !currentFriend) return alert('Выберите друга и напишите сообщение');
+           
+            const res = await fetch('/api/friends/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ toId: currentFriend, message })
+            });
+            if (res.ok) {
+                document.getElementById('messageInput').value = '';
+                await loadFriends();
+            }
+        }
+       
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+       
+        checkUser();
+        loadFriends();
+        setInterval(loadFriends, 3000);
+    </script>
+</body>
+</html>
