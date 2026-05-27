@@ -11,10 +11,6 @@
         <div class="container header-container">
             <nav class="nav-center">
                 <a href="/" class="nav-link">Главная</a>
-                <a href="/news" class="nav-link">📰 Новости</a>
-                <a href="/cities" class="nav-link">🏙️ Города</a>
-                <a href="/friends" class="nav-link">👥 Друзья</a>
-                <a href="/forum" class="nav-link">📝 Форум</a>
                 <a href="#shop" class="nav-link">Магазин</a>
                 <a href="#about" class="nav-link">О сервере</a>
                 <a href="#how-to-play" class="nav-link">Обучение</a>
@@ -117,7 +113,7 @@
         <section id="about" class="rules-section">
             <div class="container">
                 <h2 class="section-title">📜 Правила сервера</h2>
-               
+                
                 <div class="rules-category">
                     <h3>1. Общие правила</h3>
                     <div class="rules-list">
@@ -162,15 +158,22 @@
             <span class="close" id="closeProfileModal">&times;</span>
             <div id="unauthContent">
                 <h3>🔐 Профиль</h3>
-                <p>Войдите через Discord, чтобы увидеть свои роли</p>
+                <p>Войдите через Discord, чтобы получить доступ к разделам</p>
                 <button class="login-btn" id="discordLoginBtn">🎮 Войти через Discord</button>
             </div>
             <div id="authContent" style="display: none;">
-                <h3>👤 Профиль</h3>
                 <div class="user-avatar" id="userAvatar"></div>
                 <p><strong id="userName"></strong></p>
                 <p>🏷️ Роль: <span id="userRole" style="color: #2ecc2e;"></span></p>
                 <p>📊 Уровень: <span id="userLevel"></span></p>
+                
+                <div class="profile-links">
+                    <a href="/news" class="profile-link">📰 Новости</a>
+                    <a href="/cities" class="profile-link">🏙️ Города</a>
+                    <a href="/friends" class="profile-link">👥 Друзья</a>
+                    <a href="/forum" class="profile-link">📝 Форум</a>
+                </div>
+                
                 <button class="logout-btn" id="logoutBtn">🚪 Выйти</button>
             </div>
         </div>
