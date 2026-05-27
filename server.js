@@ -12,12 +12,11 @@ const app = express();
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const YOUR_GUILD_ID = process.env.YOUR_GUILD_ID;
-
-// ⚠️ ЗАМЕНИ НА СВОЙ АДРЕС
-const REDIRECT_URI = 'https://aurora-mc.onrender.com/auth/callback';
+const BOT_TOKEN = process.env.BOT_TOKEN;  // 👈 ТОКЕН БОТА
+const REDIRECT_URI = 'https://ТВОЙ_САЙТ.onrender.com/auth/callback';
 
 // ============================================
-// 📋 ID РОЛЕЙ (по приоритету от высшей к низшей)
+// 📋 ID РОЛЕЙ
 // ============================================
 const ROLE_IDS = {
     'SUPREME ADMINISTRATION': '1508797925554126959',
@@ -34,23 +33,12 @@ const ROLE_IDS = {
     'beginner': '1508183843910193303'
 };
 
-// ПОРЯДОК ПРИОРИТЕТА (от высшей к низшей)
 const ROLE_PRIORITY = [
-    'SUPREME ADMINISTRATION',
-    'ADMINISTRATION',
-    'MODERATION',
-    'HEAD OF DISCORD',
-    'HEAD OF MEDIA',
-    'COMPOSITION MONITOR',
-    'COMPOSITION OF AURORA',
-    'MEDIA',
-    'SPONSOR',
-    'ADVERTISING MANAGER',
-    'HALLWAY',
-    'beginner'
+    'SUPREME ADMINISTRATION', 'ADMINISTRATION', 'MODERATION', 'HEAD OF DISCORD',
+    'HEAD OF MEDIA', 'COMPOSITION MONITOR', 'COMPOSITION OF AURORA', 'MEDIA',
+    'SPONSOR', 'ADVERTISING MANAGER', 'HALLWAY', 'beginner'
 ];
 
-// Отображение ролей
 const ROLE_DISPLAY = {
     'SUPREME ADMINISTRATION': '👑 Supreme Administration',
     'ADMINISTRATION': '⭐ Administration',
@@ -66,7 +54,6 @@ const ROLE_DISPLAY = {
     'beginner': '🌱 Beginner'
 };
 
-// Уровни для ролей
 const ROLE_LEVEL = {
     'SUPREME ADMINISTRATION': '👑 Легендарный',
     'ADMINISTRATION': '⭐ Элитный',
@@ -120,13 +107,10 @@ app.get('/auth/discord', (req, res) => {
     res.redirect(url);
 });
 
-// Функция определения самой высокой роли
 function getHighestRoleById(userRoleIds) {
-    // Проходим по ролям в порядке приоритета (от высшей к низшей)
     for (const roleName of ROLE_PRIORITY) {
         const roleId = ROLE_IDS[roleName];
         if (roleId && userRoleIds.includes(roleId)) {
-            console.log(`🏆 Найдена роль: ${roleName} (ID: ${roleId})`);
             return {
                 name: roleName,
                 displayName: ROLE_DISPLAY[roleName],
@@ -134,8 +118,6 @@ function getHighestRoleById(userRoleIds) {
             };
         }
     }
-    // Если ни одна роль не найдена — новичок
-    console.log('🌱 Роли не найдены, назначена роль beginner');
     return {
         name: 'beginner',
         displayName: '🌱 Beginner',
@@ -171,22 +153,23 @@ app.get('/auth/callback', async (req, res) => {
         });
         const userData = await userRes.json();
         
-        console.log(`3️⃣ Пользователь: ${userData.username}`);
+        console.log(`3️⃣ Пользователь: ${userData.username} (ID: ${userData.id})`);
         
         let userRoleIds = [];
+        
+        // Используем ТОКЕН БОТА для получения ролей (а не пользовательский токен)
         try {
-            console.log('4️⃣ Получение ролей пользователя...');
+            console.log('4️⃣ Получение ролей пользователя через БОТА...');
             const memberRes = await fetchWithRetry(`https://discord.com/api/guilds/${YOUR_GUILD_ID}/members/${userData.id}`, {
-                headers: { Authorization: `Bearer ${accessToken}` }
+                headers: { Authorization: `Bot ${BOT_TOKEN}` }  // 👈 ИСПРАВЛЕНО
             });
             const memberData = await memberRes.json();
             userRoleIds = memberData.roles || [];
             console.log('📋 Все ID ролей пользователя:', userRoleIds);
         } catch (err) {
-            console.log('⚠️ Не удалось получить роли:', err.message);
+            console.log('⚠️ Не удалось получить роли через бота:', err.message);
         }
         
-        // Определяем самую высокую роль
         const highestRole = getHighestRoleById(userRoleIds);
         console.log(`🏆 Самая высокая роль: ${highestRole.displayName} (${highestRole.level})`);
         
