@@ -42,16 +42,6 @@ const PRODUCT = {
 const orders = new Map();
 
 // ============================================
-// 🤖 TELEGRAM БОТ (webhook mode — без конфликтов)
-// ============================================
-let bot = null;
-
-if (TELEGRAM_BOT_TOKEN) {
-    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
-    console.log('🤖 Telegram бот создан (webhook mode)');
-}
-
-// ============================================
 // 🛡️ RCON ФУНКЦИЯ
 // ============================================
 function sendRconCommands(playerName, commands) {
@@ -172,20 +162,23 @@ function checkAdmin(req, res, next) {
 }
 
 // ============================================
-// 🤖 TELEGRAM WEBHOOK МАРШРУТ
+// 🤖 TELEGRAM БОТ (polling mode)
 // ============================================
-app.post('/webhook/telegram', express.json(), (req, res) => {
-    if (!bot) return res.status(200).send('OK');
+let bot = null;
+
+if (TELEGRAM_BOT_TOKEN) {
+    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+    console.log('🤖 Telegram бот запущен (polling mode)');
     
-    const msg = req.body.message;
-    if (!msg) return res.status(200).send('OK');
+    bot.on('polling_error', (err) => {
+        console.log('Polling error:', err.code);
+        if (err.code === 'EFATAL' || err.code === 'ETELEGRAM') {
+            console.log('⚠️ Конфликт polling, но бот продолжает работу');
+        }
+    });
     
-    const chatId = msg.chat.id;
-    const text = msg.text || '';
-    
-    console.log(`📝 Сообщение от ${chatId}: ${text}`);
-    
-    if (text === '/start') {
+    bot.onText(/\/start/, (msg) => {
+        const chatId = msg.chat.id;
         bot.sendMessage(chatId, 
             `🎮 Добро пожаловать в Aurora Shop!\n\n` +
             `💰 Цена: ${PRODUCT.price}₽\n` +
@@ -196,9 +189,11 @@ app.post('/webhook/telegram', express.json(), (req, res) => {
             `🚀 Чтобы купить, отправь команду:\n` +
             `/buy ваш_ник_в_minecraft`
         );
-    }
-    else if (text.startsWith('/buy')) {
-        const playerName = text.replace('/buy', '').trim();
+    });
+    
+    bot.onText(/\/buy (.+)/, async (msg, match) => {
+        const chatId = msg.chat.id;
+        const playerName = match[1].trim();
         
         if (!playerName) {
             bot.sendMessage(chatId, '❌ Укажите ник игрока. Пример: /buy Steve');
@@ -231,9 +226,11 @@ app.post('/webhook/telegram', express.json(), (req, res) => {
                 `🆕 Новая заявка #${orderId}\n👤 Игрок: ${playerName}`
             );
         }
-    }
-    else if (text.startsWith('/confirm')) {
-        const orderId = text.replace('/confirm', '').trim();
+    });
+    
+    bot.onText(/\/confirm (.+)/, (msg, match) => {
+        const chatId = msg.chat.id;
+        const orderId = match[1].trim();
         const order = orders.get(orderId);
         
         if (!order || order.status !== 'pending') {
@@ -251,16 +248,18 @@ app.post('/webhook/telegram', express.json(), (req, res) => {
                 `/grant ${order.playerName} ${orderId}`
             );
         }
-    }
-    else if (text.startsWith('/grant') && chatId.toString() === ADMIN_CHAT_ID) {
-        const parts = text.split(' ');
-        if (parts.length < 3) {
-            bot.sendMessage(chatId, `❌ Используйте: /grant игрок номер_заказа`);
+    });
+    
+    bot.onText(/\/grant (.+) (.+)/, async (msg, match) => {
+        const chatId = msg.chat.id;
+        
+        if (chatId.toString() !== ADMIN_CHAT_ID) {
+            bot.sendMessage(chatId, '❌ Нет прав');
             return;
         }
         
-        const playerName = parts[1];
-        const orderId = parts[2];
+        const playerName = match[1];
+        const orderId = match[2];
         const order = orders.get(orderId);
         
         if (!order) {
@@ -281,9 +280,11 @@ app.post('/webhook/telegram', express.json(), (req, res) => {
         } catch (error) {
             bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
         }
-    }
-    else if (text.startsWith('/status')) {
-        const orderId = text.replace('/status', '').trim();
+    });
+    
+    bot.onText(/\/status (.+)/, (msg, match) => {
+        const chatId = msg.chat.id;
+        const orderId = match[1].trim();
         const order = orders.get(orderId);
         
         if (!order) {
@@ -295,8 +296,10 @@ app.post('/webhook/telegram', express.json(), (req, res) => {
                 `📌 Статус: ${order.status === 'pending' ? '⏳ Ожидает подтверждения' : '✅ Выполнен'}`
             );
         }
-    }
-    else if (text === '/help') {
+    });
+    
+    bot.onText(/\/help/, (msg) => {
+        const chatId = msg.chat.id;
         bot.sendMessage(chatId,
             `📋 Доступные команды:\n\n` +
             `/start - Приветствие\n` +
@@ -305,13 +308,8 @@ app.post('/webhook/telegram', express.json(), (req, res) => {
             `/status номер - Статус заказа\n` +
             `/help - Справка`
         );
-    }
-    else {
-        bot.sendMessage(chatId, `❓ Неизвестная команда. Используй /help`);
-    }
-    
-    res.status(200).send('OK');
-});
+    });
+}
 
 // ============================================
 // 🌐 API САЙТА
@@ -508,27 +506,15 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // ============================================
-// 🚀 ЗАПУСК И УСТАНОВКА WEBHOOK
+// 🚀 ЗАПУСК
 // ============================================
 const PORT = process.env.PORT || 3001;
-
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
     console.log('='.repeat(50));
     console.log('🚀 Aurora Server запущен!');
     console.log(`📍 http://localhost:${PORT}`);
     console.log('='.repeat(50));
     console.log('🔌 RCON готов');
-    console.log(`🤖 Telegram бот: ${TELEGRAM_BOT_TOKEN ? '✅ создан' : '❌ не найден'}`);
+    console.log(`🤖 Telegram бот: ${TELEGRAM_BOT_TOKEN ? '✅ запущен' : '❌ не найден'}`);
     console.log(`💳 ЮMoney кошелёк: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
-    
-    // Устанавливаем webhook для Telegram
-    if (bot && TELEGRAM_BOT_TOKEN) {
-        const webhookUrl = `https://aurora-mc.onrender.com/webhook/telegram`;
-        try {
-            await bot.setWebHook(webhookUrl);
-            console.log(`✅ Webhook установлен: ${webhookUrl}`);
-        } catch (err) {
-            console.error(`❌ Ошибка webhook: ${err.message}`);
-        }
-    }
 });
