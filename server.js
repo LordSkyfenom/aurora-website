@@ -164,7 +164,7 @@ function checkAdmin(req, res, next) {
 }
 
 // ============================================
-// 💳 API ДЛЯ СОЗДАНИЯ ПЛАТЕЖА
+// 💳 API ДЛЯ СОЗДАНИЯ ПЛАТЕЖА (исправлено)
 // ============================================
 app.post('/api/create-payment', checkAuth, async (req, res) => {
     const { productId, playerName } = req.body;
@@ -176,28 +176,35 @@ app.post('/api/create-payment', checkAuth, async (req, res) => {
     payments.push({ orderId, playerName, productId, price: product.price, status: 'pending', createdAt: new Date().toISOString() });
     writeData(PAYMENTS_FILE, payments);
     
-    const donationUrl = `https://www.donationalerts.com/r/ss_vindicator_ss?amount=${product.price}&message=${encodeURIComponent(`Покупка ${product.name} для ${playerName}`)}`;
+    // Пользователь сам введёт сумму, а в сообщении указано сколько нужно
+    const donationUrl = `https://www.donationalerts.com/r/ss_vindicator_ss?message=${encodeURIComponent(`Покупка ${product.name} для ${playerName} | Нужно: ${product.price}₽`)}`;
+    
     res.json({ success: true, paymentUrl: donationUrl, orderId });
 });
 
 // ============================================
-// 🔔 WEBHOOK ОТ DONATIONALERTS
+// 📥 ВРЕМЕННЫЙ МАРШРУТ ДЛЯ РУЧНОЙ ВЫДАЧИ (пока нет webhook)
+// ============================================
+app.post('/api/manual-grant', checkAuth, async (req, res) => {
+    const { playerName, productId } = req.body;
+    const product = PRODUCTS[productId];
+    if (!product) return res.status(400).json({ error: 'Товар не найден' });
+    
+    try {
+        await sendRconCommands(playerName, product.commands);
+        res.json({ success: true, message: `Привилегии выданы ${playerName}` });
+    } catch (error) {
+        console.error('RCON ошибка:', error);
+        res.status(500).json({ error: 'Ошибка выдачи привилегий' });
+    }
+});
+
+// ============================================
+// 🔔 WEBHOOK ОТ DONATIONALERTS (если появится)
 // ============================================
 app.post('/webhook/donationalerts', async (req, res) => {
     console.log('📥 Получен webhook:', req.body);
-    const { data } = req.body;
-    if (data && data.amount) {
-        const message = data.message || '';
-        const playerMatch = message.match(/для\s+(\S+)/i);
-        const playerName = playerMatch ? playerMatch[1] : data.username;
-        
-        console.log(`✅ Платёж! Игрок: ${playerName}, Сумма: ${data.amount}₽`);
-        try {
-            await sendRconCommands(playerName, PRODUCTS['sponsor'].commands);
-            console.log(`🎁 Привилегии выданы ${playerName}`);
-        } catch (err) { console.error('RCON ошибка:', err); }
-        res.status(200).send('OK');
-    } else { res.status(200).send('OK'); }
+    res.status(200).send('OK');
 });
 
 // ============================================
@@ -223,9 +230,30 @@ app.get('/auth/donationalerts', async (req, res) => {
         });
         const data = await response.json();
         fs.writeFileSync(path.join(DATA_DIR, 'da_token.json'), JSON.stringify({ token: data.access_token, updated: new Date().toISOString() }));
-        res.send('<h2>✅ DonationAlerts подключен! <a href="/">Вернуться</a></h2>');
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>DonationAlerts подключен</title>
+                <style>
+                    body { background: #1a1d24; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: system-ui; color: white; }
+                    .box { text-align: center; background: #20232b; padding: 40px; border-radius: 24px; border: 1px solid #2ecc2e; }
+                    .success { color: #2ecc2e; font-size: 48px; }
+                </style>
+            </head>
+            <body>
+                <div class="box">
+                    <div class="success">✅</div>
+                    <h2>DonationAlerts подключен!</h2>
+                    <p>Теперь можно принимать донаты.</p>
+                    <a href="/" style="color:#2ecc2e;">Вернуться на главную</a>
+                </div>
+            </body>
+            </html>
+        `);
     } catch (error) {
-        res.status(500).send('Ошибка подключения');
+        console.error('Ошибка:', error);
+        res.status(500).send('Ошибка подключения DonationAlerts');
     }
 });
 
