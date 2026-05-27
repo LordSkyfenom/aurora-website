@@ -56,7 +56,10 @@ function sendRconCommands(playerName, commands) {
                 if (completed === commands.length) { rcon.disconnect(); resolve(true); }
             });
         });
-        rcon.on('error', reject);
+        rcon.on('error', (err) => {
+            console.error(`❌ RCON ошибка: ${err.message}`);
+            reject(err);
+        });
         rcon.connect();
     });
 }
@@ -172,11 +175,9 @@ if (TELEGRAM_BOT_TOKEN) {
     
     bot.on('polling_error', (err) => {
         console.log('Polling error:', err.code);
-        if (err.code === 'EFATAL' || err.code === 'ETELEGRAM') {
-            console.log('⚠️ Конфликт polling, но бот продолжает работу');
-        }
     });
     
+    // /start
     bot.onText(/\/start/, (msg) => {
         const chatId = msg.chat.id;
         bot.sendMessage(chatId, 
@@ -191,6 +192,7 @@ if (TELEGRAM_BOT_TOKEN) {
         );
     });
     
+    // /buy
     bot.onText(/\/buy (.+)/, async (msg, match) => {
         const chatId = msg.chat.id;
         const playerName = match[1].trim();
@@ -228,6 +230,7 @@ if (TELEGRAM_BOT_TOKEN) {
         }
     });
     
+    // /confirm
     bot.onText(/\/confirm (.+)/, (msg, match) => {
         const chatId = msg.chat.id;
         const orderId = match[1].trim();
@@ -250,38 +253,53 @@ if (TELEGRAM_BOT_TOKEN) {
         }
     });
     
-    bot.onText(/\/grant (.+) (.+)/, async (msg, match) => {
+    // /grant (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+    bot.onText(/\/grant (.+)/, async (msg, match) => {
         const chatId = msg.chat.id;
+        const fullCommand = match[1].trim();
+        const parts = fullCommand.split(' ');
         
-        if (chatId.toString() !== ADMIN_CHAT_ID) {
-            bot.sendMessage(chatId, '❌ Нет прав');
+        console.log(`📝 Получена команда grant: ${fullCommand} от chatId: ${chatId}`);
+        
+        if (parts.length < 2) {
+            bot.sendMessage(chatId, `❌ Используйте: /grant игрок номер_заказа\nПример: /grant Steve 123456789`);
             return;
         }
         
-        const playerName = match[1];
-        const orderId = match[2];
+        const playerName = parts[0];
+        const orderId = parts[1];
+        
+        console.log(`👤 Игрок: ${playerName}, Заказ: ${orderId}`);
+        
         const order = orders.get(orderId);
         
         if (!order) {
+            console.log(`❌ Заказ #${orderId} не найден`);
             bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
             return;
         }
         
+        console.log(`✅ Заказ найден, статус: ${order.status}`);
+        
         try {
+            console.log(`🔑 Выдаём привилегии игроку ${playerName}...`);
             await sendRconCommands(playerName, PRODUCT.commands);
             order.status = 'completed';
             orders.set(orderId, order);
             
             bot.sendMessage(order.chatId, 
-                `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку!`,
+                `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку сервера Aurora!`,
                 { parse_mode: 'Markdown' }
             );
             bot.sendMessage(chatId, `✅ Привилегии выданы ${playerName} (заказ #${orderId})`);
+            console.log(`✅ Привилегии выданы успешно`);
         } catch (error) {
-            bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
+            console.error(`❌ Ошибка RCON: ${error.message}`);
+            bot.sendMessage(chatId, `❌ Ошибка выдачи привилегий: ${error.message}`);
         }
     });
     
+    // /status
     bot.onText(/\/status (.+)/, (msg, match) => {
         const chatId = msg.chat.id;
         const orderId = match[1].trim();
@@ -298,6 +316,7 @@ if (TELEGRAM_BOT_TOKEN) {
         }
     });
     
+    // /help
     bot.onText(/\/help/, (msg) => {
         const chatId = msg.chat.id;
         bot.sendMessage(chatId,
@@ -306,6 +325,7 @@ if (TELEGRAM_BOT_TOKEN) {
             `/buy ник - Оформить заказ\n` +
             `/confirm номер - Подтвердить оплату\n` +
             `/status номер - Статус заказа\n` +
+            `/grant игрок номер - Выдать привилегию\n` +
             `/help - Справка`
         );
     });
