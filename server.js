@@ -33,7 +33,7 @@ const PRODUCTS = {
     'sponsor': {
         id: 'sponsor',
         name: 'Поддержка сервера 🍪',
-        price: 150,
+        price: 10,
         commands: [
             'lp user {player} parent add sponsor',
             'give {player} minecraft:diamond 32'
