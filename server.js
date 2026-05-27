@@ -164,7 +164,7 @@ function checkAdmin(req, res, next) {
 }
 
 // ============================================
-// 💳 API ДЛЯ СОЗДАНИЯ ПЛАТЕЖА (исправлено)
+// 💳 API ДЛЯ СОЗДАНИЯ ПЛАТЕЖА
 // ============================================
 app.post('/api/create-payment', checkAuth, async (req, res) => {
     const { productId, playerName } = req.body;
@@ -176,14 +176,14 @@ app.post('/api/create-payment', checkAuth, async (req, res) => {
     payments.push({ orderId, playerName, productId, price: product.price, status: 'pending', createdAt: new Date().toISOString() });
     writeData(PAYMENTS_FILE, payments);
     
-    // Пользователь сам введёт сумму, а в сообщении указано сколько нужно
-    const donationUrl = `https://www.donationalerts.com/r/ss_vindicator_ss?message=${encodeURIComponent(`Покупка ${product.name} для ${playerName} | Нужно: ${product.price}₽`)}`;
+    // Просто ссылка на DonationAlerts (без параметров)
+    const donationUrl = 'https://www.donationalerts.com/r/ss_vindicator_ss';
     
     res.json({ success: true, paymentUrl: donationUrl, orderId });
 });
 
 // ============================================
-// 📥 ВРЕМЕННЫЙ МАРШРУТ ДЛЯ РУЧНОЙ ВЫДАЧИ (пока нет webhook)
+// 📥 ВРЕМЕННЫЙ МАРШРУТ ДЛЯ РУЧНОЙ ВЫДАЧИ
 // ============================================
 app.post('/api/manual-grant', checkAuth, async (req, res) => {
     const { playerName, productId } = req.body;
@@ -200,7 +200,7 @@ app.post('/api/manual-grant', checkAuth, async (req, res) => {
 });
 
 // ============================================
-// 🔔 WEBHOOK ОТ DONATIONALERTS (если появится)
+// 🔔 WEBHOOK ОТ DONATIONALERTS
 // ============================================
 app.post('/webhook/donationalerts', async (req, res) => {
     console.log('📥 Получен webhook:', req.body);
@@ -208,7 +208,7 @@ app.post('/webhook/donationalerts', async (req, res) => {
 });
 
 // ============================================
-// 🔐 DonationAlerts OAuth (для получения токена)
+// 🔐 DonationAlerts OAuth
 // ============================================
 app.get('/auth/donationalerts', async (req, res) => {
     const { code } = req.query;
