@@ -254,7 +254,7 @@ if (TELEGRAM_BOT_TOKEN) {
     });
     
     // ============================================
-    // /grant - ИСПРАВЛЕННЫЙ ОБРАБОТЧИК
+    // /grant - ИСПРАВЛЕННЫЙ ОБРАБОТЧИК С ОТВЕТОМ
     // ============================================
     bot.onText(/\/grant/, async (msg) => {
         const chatId = msg.chat.id;
@@ -262,10 +262,9 @@ if (TELEGRAM_BOT_TOKEN) {
         
         console.log(`📝 Полный текст команды: ${text}`);
         
-        // Разбираем вручную: /grant игрок номер_заказа
         const parts = text.split(' ');
         if (parts.length < 3) {
-            bot.sendMessage(chatId, `❌ Используйте: /grant игрок номер_заказа\nПример: /grant Steve 123456789`);
+            await bot.sendMessage(chatId, `❌ Используйте: /grant игрок номер_заказа\nПример: /grant Steve 123456789`);
             return;
         }
         
@@ -278,7 +277,7 @@ if (TELEGRAM_BOT_TOKEN) {
         
         if (!order) {
             console.log(`❌ Заказ #${orderId} не найден`);
-            bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
+            await bot.sendMessage(chatId, `❌ Заказ #${orderId} не найден`);
             return;
         }
         
@@ -288,28 +287,27 @@ if (TELEGRAM_BOT_TOKEN) {
             // Выдаём привилегии через RCON
             console.log(`🔑 Выдаём привилегии игроку ${playerName}...`);
             await sendRconCommands(playerName, PRODUCT.commands);
+            console.log(`✅ RCON команды выполнены успешно`);
             
             // Обновляем статус заказа
             order.status = 'completed';
             orders.set(orderId, order);
             console.log(`✅ Статус заказа #${orderId} обновлён на "completed"`);
             
+            // Отправляем сообщение админу (боту)
+            await bot.sendMessage(chatId, `✅ Привилегии выданы ${playerName} (заказ #${orderId})`);
+            console.log(`✅ Сообщение админу отправлено в чат ${chatId}`);
+            
             // Отправляем сообщение игроку
             await bot.sendMessage(order.chatId, 
                 `✅ Привилегии для игрока *${playerName}* успешно выданы!\n🎉 Спасибо за поддержку сервера Aurora!`,
                 { parse_mode: 'Markdown' }
             );
-            console.log(`✅ Сообщение отправлено игроку (chatId: ${order.chatId})`);
-            
-            // Отправляем сообщение админу
-            await bot.sendMessage(chatId, 
-                `✅ Привилегии выданы ${playerName} (заказ #${orderId})`
-            );
-            console.log(`✅ Сообщение отправлено админу (chatId: ${chatId})`);
+            console.log(`✅ Сообщение игроку отправлено в чат ${order.chatId}`);
             
         } catch (error) {
             console.error(`❌ Ошибка выдачи привилегий: ${error.message}`);
-            bot.sendMessage(chatId, `❌ Ошибка выдачи привилегий: ${error.message}`);
+            await bot.sendMessage(chatId, `❌ Ошибка выдачи привилегий: ${error.message}`);
         }
     });
     
