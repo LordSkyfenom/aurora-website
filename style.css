@@ -344,12 +344,32 @@ header {
     transition: all 0.2s ease;
     text-transform: uppercase;
     letter-spacing: 1px;
+    border: none;
+    cursor: pointer;
 }
 
 .sponsor-card:hover .sponsor-btn {
     background: #27ae60;
     transform: scale(1.02);
     box-shadow: 0 4px 12px rgba(46, 204, 46, 0.4);
+}
+
+.player-name-input {
+    width: 80%;
+    padding: 12px;
+    margin: 15px 0;
+    background: #1a1d24;
+    border: 1px solid #2ecc2e;
+    color: white;
+    border-radius: 40px;
+    text-align: center;
+    font-size: 1rem;
+}
+
+.player-name-input:focus {
+    outline: none;
+    border-color: #27ae60;
+    box-shadow: 0 0 5px rgba(46, 204, 46, 0.3);
 }
 
 .section-title {
@@ -527,7 +547,6 @@ footer {
     font-weight: 500;
 }
 
-/* Модальные окна */
 .modal {
     display: none;
     position: fixed;
@@ -562,14 +581,8 @@ footer {
 }
 
 @keyframes modalFadeIn {
-    from {
-        opacity: 0;
-        transform: scale(0.95);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1);
-    }
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
 }
 
 .close {
@@ -596,7 +609,6 @@ footer {
     line-height: 1.6;
 }
 
-/* Профиль */
 .user-avatar {
     width: 80px;
     height: 80px;
@@ -613,7 +625,6 @@ footer {
     object-fit: cover;
 }
 
-/* Ссылки в профиле */
 .profile-links {
     display: flex;
     flex-direction: column;
@@ -667,71 +678,23 @@ footer {
     background: #b91c1c;
 }
 
-/* Адаптив */
 @media (max-width: 768px) {
-    .container {
-        padding: 0 16px;
-    }
-    
-    .nav-center {
-        gap: 20px;
-    }
-    
-    .nav-link {
-        font-size: 0.85rem;
-    }
-    
-    .server-title {
-        font-size: 2.5rem;
-    }
-    
-    .sponsor-badge {
-        font-size: 1rem;
-    }
-    
-    .sponsor-title {
-        font-size: 1rem;
-    }
-    
-    .steps-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .rules-category {
-        padding: 20px;
-    }
-    
-    .rules-category h3 {
-        font-size: 1.2rem;
-    }
-    
-    .footer-links {
-        gap: 16px;
-    }
-    
-    .modal-large {
-        width: 95%;
-    }
-    
-    .profile-links {
-        gap: 8px;
-    }
+    .container { padding: 0 16px; }
+    .nav-center { gap: 20px; }
+    .nav-link { font-size: 0.85rem; }
+    .server-title { font-size: 2.5rem; }
+    .sponsor-badge { font-size: 1rem; }
+    .sponsor-title { font-size: 1rem; }
+    .steps-grid { grid-template-columns: 1fr; }
+    .rules-category { padding: 20px; }
+    .rules-category h3 { font-size: 1.2rem; }
+    .footer-links { gap: 16px; }
+    .modal-large { width: 95%; }
+    .profile-links { gap: 8px; }
+    .player-name-input { width: 90%; }
 }
 
-/* Скроллбар */
-::-webkit-scrollbar {
-    width: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: #1a1d24;
-}
-
-::-webkit-scrollbar-thumb {
-    background: #3d434d;
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: #2ecc2e;
-}
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #1a1d24; }
+::-webkit-scrollbar-thumb { background: #3d434d; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #2ecc2e; }
