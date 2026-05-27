@@ -1,4 +1,4 @@
-// Minecraft сервер API для реального онлайна
+// Получение онлайна через свой сервер
 async function fetchServerStatus() {
     const playersOnlineElement = document.getElementById('playersOnline');
     const activeCountSpan = document.getElementById('activeCount');
@@ -26,26 +26,17 @@ async function fetchServerStatus() {
     }
 }
 
-// Функция покупки спонсора
-async function buyProduct() {
+// Функция покупки (открывает Telegram бота)
+function buyProduct() {
     const playerName = document.getElementById('playerName').value;
     if (!playerName) {
         alert('Введите ваш ник в Minecraft');
         return;
     }
     
-    const res = await fetch('/api/create-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: 'sponsor', playerName })
-    });
-    const data = await res.json();
-    
-    if (data.success) {
-        window.location.href = data.paymentUrl;
-    } else {
-        alert('Ошибка создания платежа');
-    }
+    const botUsername = 'Auroramcp_bot';
+    const telegramUrl = `https://t.me/${botUsername}?start=buy_${playerName}`;
+    window.open(telegramUrl, '_blank');
 }
 
 // Discord авторизация
