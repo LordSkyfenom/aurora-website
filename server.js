@@ -164,26 +164,62 @@ function checkAdmin(req, res, next) {
 }
 
 // ============================================
-// 💳 API ДЛЯ СОЗДАНИЯ ПЛАТЕЖА
+// 🧪 ТЕСТОВЫЙ МАРШРУТ
 // ============================================
-app.post('/api/create-payment', checkAuth, async (req, res) => {
-    const { productId, playerName } = req.body;
-    const product = PRODUCTS[productId];
-    if (!product) return res.status(400).json({ error: 'Товар не найден' });
-    
-    const orderId = `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
-    const payments = readData(PAYMENTS_FILE);
-    payments.push({ orderId, playerName, productId, price: product.price, status: 'pending', createdAt: new Date().toISOString() });
-    writeData(PAYMENTS_FILE, payments);
-    
-    // Просто ссылка на DonationAlerts (без параметров)
-    const donationUrl = 'https://www.donationalerts.com/r/ss_vindicator_ss';
-    
-    res.json({ success: true, paymentUrl: donationUrl, orderId });
+app.get('/api/test', (req, res) => {
+    res.json({ status: 'ok', message: 'Сервер работает', session: req.session.userId ? 'авторизован' : 'не авторизован' });
 });
 
 // ============================================
-// 📥 ВРЕМЕННЫЙ МАРШРУТ ДЛЯ РУЧНОЙ ВЫДАЧИ
+// 💳 API ДЛЯ СОЗДАНИЯ ПЛАТЕЖА (ИСПРАВЛЕНО)
+// ============================================
+app.post('/api/create-payment', checkAuth, async (req, res) => {
+    console.log('📥 Получен запрос на создание платежа');
+    console.log('Тело запроса:', req.body);
+    console.log('Сессия:', req.session.userId);
+    
+    try {
+        const { productId, playerName } = req.body;
+        
+        if (!productId || !playerName) {
+            console.log('❌ Нет productId или playerName');
+            return res.status(400).json({ error: 'Не указан товар или ник игрока' });
+        }
+        
+        const product = PRODUCTS[productId];
+        if (!product) {
+            console.log('❌ Товар не найден:', productId);
+            return res.status(400).json({ error: 'Товар не найден' });
+        }
+        
+        const orderId = `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+        
+        // Сохраняем платёж
+        const payments = readData(PAYMENTS_FILE);
+        payments.push({ 
+            orderId, 
+            playerName, 
+            productId, 
+            price: product.price, 
+            status: 'pending', 
+            createdAt: new Date().toISOString() 
+        });
+        writeData(PAYMENTS_FILE, payments);
+        
+        // Простая ссылка на DonationAlerts (без параметров)
+        const donationUrl = 'https://www.donationalerts.com/r/ss_vindicator_ss';
+        
+        console.log(`✅ Платёж создан: ${orderId}, ссылка: ${donationUrl}`);
+        res.json({ success: true, paymentUrl: donationUrl, orderId });
+        
+    } catch (error) {
+        console.error('❌ Ошибка создания платежа:', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера: ' + error.message });
+    }
+});
+
+// ============================================
+// 📥 РУЧНАЯ ВЫДАЧА ПРИВИЛЕГИЙ (ДЛЯ ТЕСТА)
 // ============================================
 app.post('/api/manual-grant', checkAuth, async (req, res) => {
     const { playerName, productId } = req.body;
@@ -450,4 +486,5 @@ app.listen(PORT, () => {
     console.log('='.repeat(50));
     console.log('💳 DonationAlerts готова');
     console.log('🔌 RCON готов');
+    console.log('🧪 Тестовый маршрут: /api/test');
 });
