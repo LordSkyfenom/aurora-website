@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const https = require('https');
@@ -5,12 +7,12 @@ const https = require('https');
 const app = express();
 
 // ============================================
-// 🔧 ТВОИ ДАННЫЕ
+// 🔒 ДАННЫЕ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ
 // ============================================
-const DISCORD_CLIENT_ID = '1508926083163095221';
-const DISCORD_CLIENT_SECRET = 'JJKNH2CqCC1_XaTvjLz4DL4SKzU_VSyQ';
-const YOUR_GUILD_ID = '1508126261401354291';
-const REDIRECT_URI = 'http://localhost:3001/auth/callback';
+const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+const YOUR_GUILD_ID = process.env.YOUR_GUILD_ID;
+const REDIRECT_URI = process.env.REDIRECT_URI;
 
 // ============================================
 // 📋 ID РОЛЕЙ
@@ -37,21 +39,33 @@ const ROLE_PRIORITY = [
 ];
 
 const ROLE_DISPLAY = {
-    'SUPREME ADMINISTRATION': '👑 Supreme Administration', 'ADMINISTRATION': '⭐ Administration',
-    'MODERATION': '🛡️ Moderation', 'HEAD OF DISCORD': '📢 Head of Discord',
-    'HEAD OF MEDIA': '🎬 Head of Media', 'COMPOSITION MONITOR': '🔍 Composition Monitor',
-    'COMPOSITION OF AURORA': '🤝 Composition of Aurora', 'MEDIA': '📹 Media',
-    'SPONSOR': '💎 Sponsor', 'ADVERTISING MANAGER': '📢 Advertising Manager',
-    'HALLWAY': '🚪 Hallway', 'beginner': '🌱 Beginner'
+    'SUPREME ADMINISTRATION': '👑 Supreme Administration',
+    'ADMINISTRATION': '⭐ Administration',
+    'MODERATION': '🛡️ Moderation',
+    'HEAD OF DISCORD': '📢 Head of Discord',
+    'HEAD OF MEDIA': '🎬 Head of Media',
+    'COMPOSITION MONITOR': '🔍 Composition Monitor',
+    'COMPOSITION OF AURORA': '🤝 Composition of Aurora',
+    'MEDIA': '📹 Media',
+    'SPONSOR': '💎 Sponsor',
+    'ADVERTISING MANAGER': '📢 Advertising Manager',
+    'HALLWAY': '🚪 Hallway',
+    'beginner': '🌱 Beginner'
 };
 
 const ROLE_LEVEL = {
-    'SUPREME ADMINISTRATION': '👑 Легендарный', 'ADMINISTRATION': '⭐ Элитный',
-    'MODERATION': '🛡️ Продвинутый', 'HEAD OF DISCORD': '📢 Глава Discord',
-    'HEAD OF MEDIA': '🎬 Глава медиа', 'COMPOSITION MONITOR': '🔍 Следящий',
-    'COMPOSITION OF AURORA': '🤝 Команда Aurora', 'MEDIA': '📹 Медиа-партнер',
-    'SPONSOR': '💎 Спонсор', 'ADVERTISING MANAGER': '📢 Рекламный менеджер',
-    'HALLWAY': '🚪 Hallway', 'beginner': '🌱 Новичок'
+    'SUPREME ADMINISTRATION': '👑 Легендарный',
+    'ADMINISTRATION': '⭐ Элитный',
+    'MODERATION': '🛡️ Продвинутый',
+    'HEAD OF DISCORD': '📢 Глава Discord',
+    'HEAD OF MEDIA': '🎬 Глава медиа',
+    'COMPOSITION MONITOR': '🔍 Следящий',
+    'COMPOSITION OF AURORA': '🤝 Команда Aurora',
+    'MEDIA': '📹 Медиа-партнер',
+    'SPONSOR': '💎 Спонсор',
+    'ADVERTISING MANAGER': '📢 Рекламный менеджер',
+    'HALLWAY': '🚪 Hallway',
+    'beginner': '🌱 Новичок'
 };
 
 const agent = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
@@ -76,7 +90,6 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// ========== НОВЫЙ ПРОКСИ ДЛЯ ОНЛАЙНА ==========
 app.get('/api/server-status', async (req, res) => {
     try {
         const apiUrl = 'https://api.mcsrvstat.us/2/213.171.18.141:32803';
@@ -84,8 +97,7 @@ app.get('/api/server-status', async (req, res) => {
         const data = await response.json();
         res.json(data);
     } catch (error) {
-        console.error('Ошибка получения статуса сервера:', error);
-        res.status(500).json({ error: 'Failed to fetch server status' });
+        res.status(500).json({ error: 'Failed to fetch server status', online: false, players: { online: 0, max: 50 } });
     }
 });
 
@@ -107,7 +119,7 @@ function getMainRoleById(userRoleIds) {
 app.get('/auth/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('Нет кода');
-   
+    
     try {
         const tokenParams = new URLSearchParams();
         tokenParams.append('client_id', DISCORD_CLIENT_ID);
@@ -115,7 +127,7 @@ app.get('/auth/callback', async (req, res) => {
         tokenParams.append('grant_type', 'authorization_code');
         tokenParams.append('code', code);
         tokenParams.append('redirect_uri', REDIRECT_URI);
-       
+        
         const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -123,12 +135,12 @@ app.get('/auth/callback', async (req, res) => {
         });
         const tokenData = await tokenRes.json();
         const accessToken = tokenData.access_token;
-       
+        
         const userRes = await fetchWithRetry('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         const userData = await userRes.json();
-       
+        
         let userRoleIds = [];
         try {
             const memberRes = await fetchWithRetry(`https://discord.com/api/guilds/${YOUR_GUILD_ID}/members/${userData.id}`, {
@@ -137,13 +149,13 @@ app.get('/auth/callback', async (req, res) => {
             const memberData = await memberRes.json();
             userRoleIds = memberData.roles || [];
         } catch (err) {}
-       
+        
         const mainRole = getMainRoleById(userRoleIds);
         const result = {
             id: userData.id, username: userData.username, avatar: userData.avatar,
             displayRole: mainRole.displayName, level: mainRole.level, allRoleIds: userRoleIds
         };
-       
+        
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -170,10 +182,8 @@ app.get('/auth/callback', async (req, res) => {
     }
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-    console.log('='.repeat(50));
     console.log('🚀 Aurora Server запущен!');
-    console.log(`📍 http://localhost:${PORT}`);
-    console.log('='.repeat(50));
+    console.log(`📍 Порт: ${PORT}`);
 });
