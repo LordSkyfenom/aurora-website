@@ -1,189 +1,131 @@
-require('dotenv').config();
+// Получение онлайна через свой сервер
+async function fetchServerStatus() {
+    const playersOnlineElement = document.getElementById('playersOnline');
+    const activeCountSpan = document.getElementById('activeCount');
 
-const express = require('express');
-const path = require('path');
-const https = require('https');
+    if (playersOnlineElement) playersOnlineElement.textContent = '...';
+    if (activeCountSpan) activeCountSpan.textContent = '...';
 
-const app = express();
-
-// ============================================
-// 🔒 ДАННЫЕ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ
-// ============================================
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const YOUR_GUILD_ID = process.env.YOUR_GUILD_ID;
-const REDIRECT_URI = process.env.REDIRECT_URI;
-
-// ============================================
-// 📋 ID РОЛЕЙ
-// ============================================
-const ROLE_IDS = {
-    'SUPREME ADMINISTRATION': '1508797925554126959',
-    'ADMINISTRATION': '1508797941152878684',
-    'MODERATION': '1508797937810145361',
-    'HEAD OF DISCORD': '1508190877149958154',
-    'HEAD OF MEDIA': '1508191987117854870',
-    'COMPOSITION MONITOR': '1508190618323779624',
-    'COMPOSITION OF AURORA': '1508193203009093723',
-    'MEDIA': '1508191854523318322',
-    'SPONSOR': '1508191402255843468',
-    'ADVERTISING MANAGER': '1508859389514088668',
-    'HALLWAY': '1508172721035677899',
-    'beginner': '1508183843910193303'
-};
-
-const ROLE_PRIORITY = [
-    'SUPREME ADMINISTRATION', 'ADMINISTRATION', 'MODERATION', 'HEAD OF DISCORD',
-    'HEAD OF MEDIA', 'COMPOSITION MONITOR', 'COMPOSITION OF AURORA', 'MEDIA',
-    'SPONSOR', 'ADVERTISING MANAGER', 'HALLWAY', 'beginner'
-];
-
-const ROLE_DISPLAY = {
-    'SUPREME ADMINISTRATION': '👑 Supreme Administration',
-    'ADMINISTRATION': '⭐ Administration',
-    'MODERATION': '🛡️ Moderation',
-    'HEAD OF DISCORD': '📢 Head of Discord',
-    'HEAD OF MEDIA': '🎬 Head of Media',
-    'COMPOSITION MONITOR': '🔍 Composition Monitor',
-    'COMPOSITION OF AURORA': '🤝 Composition of Aurora',
-    'MEDIA': '📹 Media',
-    'SPONSOR': '💎 Sponsor',
-    'ADVERTISING MANAGER': '📢 Advertising Manager',
-    'HALLWAY': '🚪 Hallway',
-    'beginner': '🌱 Beginner'
-};
-
-const ROLE_LEVEL = {
-    'SUPREME ADMINISTRATION': '👑 Легендарный',
-    'ADMINISTRATION': '⭐ Элитный',
-    'MODERATION': '🛡️ Продвинутый',
-    'HEAD OF DISCORD': '📢 Глава Discord',
-    'HEAD OF MEDIA': '🎬 Глава медиа',
-    'COMPOSITION MONITOR': '🔍 Следящий',
-    'COMPOSITION OF AURORA': '🤝 Команда Aurora',
-    'MEDIA': '📹 Медиа-партнер',
-    'SPONSOR': '💎 Спонсор',
-    'ADVERTISING MANAGER': '📢 Рекламный менеджер',
-    'HALLWAY': '🚪 Hallway',
-    'beginner': '🌱 Новичок'
-};
-
-const agent = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
-
-async function fetchWithRetry(url, options, retries = 3) {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const response = await fetch(url, { ...options, agent });
-            if (response.ok) return response;
-            throw new Error(`HTTP ${response.status}`);
-        } catch (error) {
-            if (i === retries - 1) throw error;
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-    }
-}
-
-app.use(express.json());
-app.use(express.static(__dirname));
-
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.get('/api/server-status', async (req, res) => {
     try {
-        const apiUrl = 'https://api.mcsrvstat.us/2/213.171.18.141:32803';
-        const response = await fetch(apiUrl);
+        const response = await fetch('/api/server-status');
         const data = await response.json();
-        res.json(data);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch server status', online: false, players: { online: 0, max: 50 } });
-    }
-});
 
-app.get('/auth/discord', (req, res) => {
-    const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds%20guilds.members.read`;
-    res.redirect(url);
-});
-
-function getMainRoleById(userRoleIds) {
-    for (const priorityRole of ROLE_PRIORITY) {
-        const roleId = ROLE_IDS[priorityRole];
-        if (roleId && userRoleIds.includes(roleId)) {
-            return { name: priorityRole, displayName: ROLE_DISPLAY[priorityRole], level: ROLE_LEVEL[priorityRole] };
+        if (data.online === true && data.players && typeof data.players.online === 'number') {
+            const online = data.players.online;
+            const max = data.players.max || 50;
+            if (playersOnlineElement) playersOnlineElement.textContent = `${online}/${max}`;
+            if (activeCountSpan) activeCountSpan.textContent = online;
+        } else {
+            if (playersOnlineElement) playersOnlineElement.textContent = '0/50';
+            if (activeCountSpan) activeCountSpan.textContent = '0';
         }
+    } catch (error) {
+        console.error('Ошибка получения статуса:', error);
+        if (playersOnlineElement) playersOnlineElement.textContent = '0/50';
+        if (activeCountSpan) activeCountSpan.textContent = '0';
     }
-    return { name: 'beginner', displayName: '🌱 Beginner', level: '🌱 Новичок' };
 }
 
-app.get('/auth/callback', async (req, res) => {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('Нет кода');
-    
-    try {
-        const tokenParams = new URLSearchParams();
-        tokenParams.append('client_id', DISCORD_CLIENT_ID);
-        tokenParams.append('client_secret', DISCORD_CLIENT_SECRET);
-        tokenParams.append('grant_type', 'authorization_code');
-        tokenParams.append('code', code);
-        tokenParams.append('redirect_uri', REDIRECT_URI);
-        
-        const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: tokenParams
-        });
-        const tokenData = await tokenRes.json();
-        const accessToken = tokenData.access_token;
-        
-        const userRes = await fetchWithRetry('https://discord.com/api/users/@me', {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        const userData = await userRes.json();
-        
-        let userRoleIds = [];
+// Discord авторизация
+function checkAuth() {
+    const userData = localStorage.getItem('aurora_user');
+    if (userData) {
         try {
-            const memberRes = await fetchWithRetry(`https://discord.com/api/guilds/${YOUR_GUILD_ID}/members/${userData.id}`, {
-                headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            const memberData = await memberRes.json();
-            userRoleIds = memberData.roles || [];
-        } catch (err) {}
-        
-        const mainRole = getMainRoleById(userRoleIds);
-        const result = {
-            id: userData.id, username: userData.username, avatar: userData.avatar,
-            displayRole: mainRole.displayName, level: mainRole.level, allRoleIds: userRoleIds
-        };
-        
-        res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head><title>Авторизация Aurora</title></head>
-            <body style="background:#1a1d24; color:white; font-family:system-ui; text-align:center; padding-top:100px;">
-                <div style="background:#20232b; padding:40px; border-radius:24px; max-width:400px; margin:0 auto;">
-                    <div style="width:40px; height:40px; border:3px solid #2ecc2e; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin:20px auto;"></div>
-                    <div style="color:#2ecc2e; font-size:24px;">✅ Вход выполнен!</div>
-                    <p>👤 ${userData.username}</p>
-                    <p>🏷️ Роль: ${mainRole.displayName}</p>
-                    <p>📊 Уровень: ${mainRole.level}</p>
-                    <p>🔄 Перенаправление...</p>
-                </div>
-                <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
-                <script>
-                    localStorage.setItem('aurora_user', '${JSON.stringify(result).replace(/'/g, "\\'")}');
-                    setTimeout(() => { window.location.href = '/'; }, 1500);
-                </script>
-            </body>
-            </html>
-        `);
-    } catch (error) {
-        res.status(500).send('Ошибка авторизации');
+            const user = JSON.parse(userData);
+            updateUIWithUser(user);
+            return true;
+        } catch(e) { console.error("Ошибка парсинга userData", e); }
     }
+    return false;
+}
+
+function updateUIWithUser(user) {
+    const levelSpan = document.getElementById('level');
+    if(levelSpan) levelSpan.textContent = user.level;
+    const userNameSpan = document.getElementById('userName');
+    if(userNameSpan) userNameSpan.textContent = user.username;
+    const userRoleSpan = document.getElementById('userRole');
+    if(userRoleSpan) userRoleSpan.textContent = user.displayRole;
+    const userLevelSpan = document.getElementById('userLevel');
+    if(userLevelSpan) userLevelSpan.textContent = user.level;
+    
+    const avatarUrl = user.avatar 
+        ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`
+        : 'https://cdn.discordapp.com/embed/avatars/0.png';
+    const userAvatarDiv = document.getElementById('userAvatar');
+    if(userAvatarDiv) userAvatarDiv.innerHTML = `<img src="${avatarUrl}" alt="avatar">`;
+    
+    const unauthDiv = document.getElementById('unauthContent');
+    const authDiv = document.getElementById('authContent');
+    if(unauthDiv) unauthDiv.style.display = 'none';
+    if(authDiv) authDiv.style.display = 'block';
+}
+
+function logout() {
+    localStorage.removeItem('aurora_user');
+    const levelSpan = document.getElementById('level');
+    if(levelSpan) levelSpan.textContent = '🌱 Новичок';
+    const unauthDiv = document.getElementById('unauthContent');
+    const authDiv = document.getElementById('authContent');
+    if(unauthDiv) unauthDiv.style.display = 'block';
+    if(authDiv) authDiv.style.display = 'none';
+    const profileModal = document.getElementById('profileModal');
+    if(profileModal) profileModal.style.display = 'none';
+}
+
+function loginWithDiscord() {
+    window.location.href = '/auth/discord';
+}
+
+// Модальные окна
+const infoModal = document.getElementById('infoModal');
+const closeInfoBtn = document.getElementById('closeInfoModal');
+const modalContent = document.getElementById('modalContent');
+function openModal(content) {
+    if(modalContent) modalContent.innerHTML = content;
+    if(infoModal) infoModal.style.display = 'flex';
+}
+if(closeInfoBtn) closeInfoBtn.onclick = () => { if(infoModal) infoModal.style.display = 'none'; };
+
+// Обработчики для ссылок в подвале
+const termsLink = document.getElementById('termsLink');
+if(termsLink) termsLink.onclick = (e) => { e.preventDefault(); openModal('<h3>📄 Пользовательское соглашение</h3><p>Текст соглашения...</p>'); };
+const privacyLink = document.getElementById('privacyLink');
+if(privacyLink) privacyLink.onclick = (e) => { e.preventDefault(); openModal('<h3>🔒 Политика конфиденциальности</h3><p>Текст политики...</p>'); };
+const faqLink = document.getElementById('faqLink');
+if(faqLink) faqLink.onclick = (e) => { e.preventDefault(); openModal('<h3>❓ FAQ</h3><p>Часто задаваемые вопросы...</p>'); };
+const supportLink = document.getElementById('supportLink');
+if(supportLink) supportLink.onclick = (e) => { e.preventDefault(); openModal('<h3>🛠️ Техподдержка</h3><p>Discord: ss_vindicator_ss</p>'); };
+
+// Профиль модалка
+const profileModal = document.getElementById('profileModal');
+const profileBtn = document.getElementById('profileBtn');
+const closeProfileBtn = document.getElementById('closeProfileModal');
+if(profileBtn) profileBtn.onclick = () => { if(profileModal) profileModal.style.display = 'flex'; };
+if(closeProfileBtn) closeProfileBtn.onclick = () => { if(profileModal) profileModal.style.display = 'none'; };
+window.onclick = (event) => {
+    if (event.target === infoModal && infoModal) infoModal.style.display = 'none';
+    if (event.target === profileModal && profileModal) profileModal.style.display = 'none';
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    const loginBtn = document.getElementById('discordLoginBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    if(loginBtn) loginBtn.onclick = loginWithDiscord;
+    if(logoutBtn) logoutBtn.onclick = logout;
+    checkAuth();
+    fetchServerStatus();
+    setInterval(fetchServerStatus, 30000);
 });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-    console.log('🚀 Aurora Server запущен!');
-    console.log(`📍 Порт: ${PORT}`);
+// Плавная прокрутка
+document.querySelectorAll('.nav-link, .sponsor-btn').forEach(anchor => {
+    anchor.addEventListener('click', function(e) {
+        const href = this.getAttribute('href');
+        if (href && href.startsWith('#')) {
+            e.preventDefault();
+            const target = document.querySelector(href);
+            if (target) target.scrollIntoView({ behavior: 'smooth' });
+        }
+    });
 });
