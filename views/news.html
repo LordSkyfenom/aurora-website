@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Новости - Aurora</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .container-news { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+        .news-item { background: #20232b; border-radius: 16px; padding: 20px; margin-bottom: 20px; border-left: 3px solid #2ecc2e; }
+        .news-title { color: #2ecc2e; margin-bottom: 10px; }
+        .news-meta { color: #919ba8; font-size: 0.8rem; margin-bottom: 10px; }
+        .news-content { color: #cbd0d6; line-height: 1.5; }
+        .delete-btn { background: #dc2626; color: white; border: none; padding: 5px 10px; border-radius: 8px; cursor: pointer; float: right; }
+        .create-form { background: #20232b; border-radius: 16px; padding: 20px; margin-bottom: 30px; }
+        .create-form input, .create-form textarea { width: 100%; padding: 10px; margin: 10px 0; background: #1a1d24; border: 1px solid #3d434d; color: white; border-radius: 8px; }
+        .create-form button { background: #2ecc2e; color: #1a1d24; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
+        .admin-badge { background: #2ecc2e; color: #1a1d24; padding: 2px 8px; border-radius: 20px; font-size: 0.7rem; display: inline-block; margin-left: 10px; }
+        .back-link { display: inline-block; margin-bottom: 20px; color: #2ecc2e; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container-news">
+        <a href="/" class="back-link">← На главную</a>
+        <h1 style="color:#2ecc2e;">📰 Новости сервера</h1>
+       
+        <div id="adminPanel" style="display:none;">
+            <div class="create-form">
+                <h3>➕ Создать новость</h3>
+                <input type="text" id="newsTitle" placeholder="Заголовок">
+                <textarea id="newsContent" rows="4" placeholder="Текст новости"></textarea>
+                <button onclick="createNews()">Опубликовать</button>
+            </div>
+        </div>
+       
+        <div id="newsList"></div>
+    </div>
+   
+    <script>
+        let userRole = null;
+       
+        async function checkUser() {
+            const res = await fetch('/api/user');
+            const data = await res.json();
+            if (data.authenticated) {
+                userRole = data.role;
+                if (userRole === 'SUPREME ADMINISTRATION') {
+                    document.getElementById('adminPanel').style.display = 'block';
+                }
+            }
+        }
+       
+        async function loadNews() {
+            const res = await fetch('/api/news');
+            const news = await res.json();
+            const container = document.getElementById('newsList');
+            container.innerHTML = news.map(n => `
+                <div class="news-item">
+                    ${userRole === 'SUPREME ADMINISTRATION' ? `<button class="delete-btn" onclick="deleteNews(${n.id})">🗑️</button>` : ''}
+                    <h3 class="news-title">${escapeHtml(n.title)}</h3>
+                    <div class="news-meta">📅 ${new Date(n.createdAt).toLocaleString()} | ✍️ ${escapeHtml(n.authorName)}</div>
+                    <div class="news-content">${escapeHtml(n.content).replace(/\n/g, '<br>')}</div>
+                </div>
+            `).join('');
+        }
+       
+        async function createNews() {
+            const title = document.getElementById('newsTitle').value;
+            const content = document.getElementById('newsContent').value;
+            if (!title || !content) return alert('Заполните все поля');
+           
+            const res = await fetch('/api/news', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, content })
+            });
+            if (res.ok) {
+                document.getElementById('newsTitle').value = '';
+                document.getElementById('newsContent').value = '';
+                loadNews();
+            } else {
+                alert('Ошибка: нет прав');
+            }
+        }
+       
+        async function deleteNews(id) {
+            if (confirm('Удалить новость?')) {
+                await fetch(`/api/news/${id}`, { method: 'DELETE' });
+                loadNews();
+            }
+        }
+       
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+       
+        checkUser();
+        loadNews();
+    </script>
+</body>
+</html>
