@@ -62,6 +62,10 @@ let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
     bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
     console.log('🤖 Telegram бот запущен (только уведомления)');
+    
+    bot.on('polling_error', (err) => {
+        console.log('Polling error:', err.code);
+    });
 }
 
 // ============================================
@@ -252,12 +256,193 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, (req, res) => {
 // ============================================
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/payment-status', (req, res) => res.sendFile(path.join(__dirname, 'payment-status.html')));
-app.get('/admin', checkAuth, checkOwner, (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+
+// Админ панель (с проверкой авторизации и прав владельца)
+app.get('/admin', (req, res) => {
+    // Проверяем авторизацию
+    if (!req.session.userId) {
+        return res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Доступ запрещён</title>
+                <style>
+                    body { background: #1a1d24; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: system-ui; color: white; margin: 0; }
+                    .error-box { text-align: center; background: #20232b; padding: 40px; border-radius: 24px; border: 1px solid #ff4444; }
+                    .error-box h1 { color: #ff4444; margin-bottom: 20px; }
+                    .back-link { color: #2ecc2e; text-decoration: none; margin-top: 20px; display: inline-block; }
+                </style>
+            </head>
+            <body>
+                <div class="error-box">
+                    <h1>🔒 Доступ запрещён</h1>
+                    <p>Вы не авторизованы. Войдите через Discord.</p>
+                    <a href="/" class="back-link">← На главную для входа</a>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+    
+    // Проверяем, что это владелец
+    if (req.session.userId !== OWNER_DISCORD_ID) {
+        return res.status(403).send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Доступ запрещён</title>
+                <style>
+                    body { background: #1a1d24; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: system-ui; color: white; margin: 0; }
+                    .error-box { text-align: center; background: #20232b; padding: 40px; border-radius: 24px; border: 1px solid #ff4444; }
+                    .error-box h1 { color: #ff4444; margin-bottom: 20px; }
+                    .back-link { color: #2ecc2e; text-decoration: none; margin-top: 20px; display: inline-block; }
+                </style>
+            </head>
+            <body>
+                <div class="error-box">
+                    <h1>⛔ Нет прав</h1>
+                    <p>У вас нет доступа к админ панели.</p>
+                    <a href="/" class="back-link">← На главную</a>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+    
+    // Всё ок — отдаём страницу
+    res.sendFile(path.join(__dirname, 'admin.html'));
+});
 
 // ============================================
 // 🧪 ТЕСТОВЫЙ МАРШРУТ
 // ============================================
 app.get('/api/test', (req, res) => res.json({ status: 'ok' }));
+
+// ============================================
+// 🌐 API ДЛЯ НОВОСТЕЙ, ГОРОДОВ, ДРУЗЕЙ, ФОРУМА
+// ============================================
+const NEWS_FILE = path.join(DATA_DIR, 'news.json');
+const CITIES_FILE = path.join(DATA_DIR, 'cities.json');
+const FRIENDS_FILE = path.join(DATA_DIR, 'friends.json');
+const FORUM_FILE = path.join(DATA_DIR, 'forum.json');
+
+function initDataFile(file, defaultData) {
+    if (!fs.existsSync(file)) fs.writeFileSync(file, JSON.stringify(defaultData, null, 2));
+}
+function readData(file) { return JSON.parse(fs.readFileSync(file)); }
+function writeData(file, data) { fs.writeFileSync(file, JSON.stringify(data, null, 2)); }
+
+initDataFile(NEWS_FILE, []);
+initDataFile(CITIES_FILE, []);
+initDataFile(FRIENDS_FILE, {});
+initDataFile(FORUM_FILE, []);
+
+app.get('/api/news', (req, res) => res.json(readData(NEWS_FILE)));
+app.post('/api/news', checkAuth, (req, res) => {
+    const { title, content } = req.body;
+    const news = readData(NEWS_FILE);
+    news.unshift({ id: Date.now(), title, content, authorId: req.session.userId, authorName: req.session.username, createdAt: new Date().toISOString() });
+    writeData(NEWS_FILE, news);
+    res.json({ success: true });
+});
+app.delete('/api/news/:id', checkAuth, (req, res) => {
+    let news = readData(NEWS_FILE);
+    news = news.filter(n => n.id != req.params.id);
+    writeData(NEWS_FILE, news);
+    res.json({ success: true });
+});
+
+app.get('/api/cities', (req, res) => res.json(readData(CITIES_FILE)));
+app.post('/api/cities', checkAuth, (req, res) => {
+    const { name, description } = req.body;
+    const cities = readData(CITIES_FILE);
+    cities.push({ id: Date.now(), name, description, ownerId: req.session.userId, ownerName: req.session.username, createdAt: new Date().toISOString() });
+    writeData(CITIES_FILE, cities);
+    res.json({ success: true });
+});
+app.delete('/api/cities/:id', checkAuth, (req, res) => {
+    let cities = readData(CITIES_FILE);
+    cities = cities.filter(c => c.id != req.params.id || c.ownerId !== req.session.userId);
+    writeData(CITIES_FILE, cities);
+    res.json({ success: true });
+});
+
+app.get('/api/friends/data', checkAuth, (req, res) => {
+    const data = readData(FRIENDS_FILE);
+    res.json(data[req.session.userId] || { friends: [], messages: [] });
+});
+app.post('/api/friends/add', checkAuth, (req, res) => {
+    const { friendId } = req.body;
+    const data = readData(FRIENDS_FILE);
+    if (!data[req.session.userId]) data[req.session.userId] = { friends: [], messages: [] };
+    if (!data[req.session.userId].friends.includes(friendId)) {
+        data[req.session.userId].friends.push(friendId);
+        if (!data[friendId]) data[friendId] = { friends: [], messages: [] };
+        if (!data[friendId].friends.includes(req.session.userId)) data[friendId].friends.push(req.session.userId);
+        writeData(FRIENDS_FILE, data);
+    }
+    res.json({ success: true });
+});
+app.post('/api/friends/message', checkAuth, (req, res) => {
+    const { toId, message } = req.body;
+    const data = readData(FRIENDS_FILE);
+    const msg = { id: Date.now(), from: req.session.userId, fromName: req.session.username, to: toId, message, timestamp: new Date().toISOString() };
+    if (!data[req.session.userId]) data[req.session.userId] = { friends: [], messages: [] };
+    data[req.session.userId].messages.push(msg);
+    if (!data[toId]) data[toId] = { friends: [], messages: [] };
+    data[toId].messages.push(msg);
+    writeData(FRIENDS_FILE, data);
+    res.json({ success: true });
+});
+
+app.get('/api/forum', (req, res) => res.json(readData(FORUM_FILE)));
+app.post('/api/forum', checkAuth, (req, res) => {
+    const { title, content } = req.body;
+    const forum = readData(FORUM_FILE);
+    forum.push({ id: Date.now(), title, content, authorId: req.session.userId, authorName: req.session.username, createdAt: new Date().toISOString(), answers: [] });
+    writeData(FORUM_FILE, forum);
+    res.json({ success: true });
+});
+app.post('/api/forum/:id/answer', checkAuth, (req, res) => {
+    const { content } = req.body;
+    const forum = readData(FORUM_FILE);
+    const post = forum.find(p => p.id == req.params.id);
+    if (post) {
+        post.answers.push({ id: Date.now(), authorId: req.session.userId, authorName: req.session.username, content, createdAt: new Date().toISOString() });
+        writeData(FORUM_FILE, forum);
+        res.json({ success: true });
+    } else res.status(404).json({ error: 'Пост не найден' });
+});
+
+// ============================================
+// 📊 API СТАТУС СЕРВЕРА
+// ============================================
+app.get('/api/server-status', async (req, res) => {
+    try {
+        const response = await fetch('https://api.mcsrvstat.us/2/213.171.18.141:32803');
+        const data = await response.json();
+        res.json(data);
+    } catch {
+        res.json({ online: false, players: { online: 0, max: 99 } });
+    }
+});
+
+// ============================================
+// 👤 API ПОЛЬЗОВАТЕЛЯ
+// ============================================
+app.get('/api/user', (req, res) => {
+    if (req.session.userId) {
+        res.json({
+            authenticated: true,
+            id: req.session.userId,
+            username: req.session.username,
+            role: req.session.userRole,
+            level: req.session.userLevel
+        });
+    } else {
+        res.json({ authenticated: false });
+    }
+});
 
 // ============================================
 // 🔐 DISCORD OAuth2
@@ -363,7 +548,7 @@ app.listen(PORT, () => {
     console.log(`📍 http://localhost:${PORT}`);
     console.log('='.repeat(50));
     console.log('🔌 RCON готов');
-    console.log(`👑 Владелец: ${OWNER_DISCORD_ID || '❌ не указан'}`);
+    console.log(`👑 Владелец ID: ${OWNER_DISCORD_ID || '❌ не указан'}`);
     console.log(`🤖 Telegram бот: ${TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
-    console.log(`💳 ЮMoney: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
+    console.log(`💳 ЮMoney кошелёк: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
 });
