@@ -29,6 +29,7 @@ const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID;
 const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET;
 
 const DATABASE_URL = process.env.DATABASE_URL;
+const ONLINE_API_KEY = process.env.ONLINE_API_KEY;
 
 // IP и порт Minecraft сервера
 const SERVER_IP = '213.171.18.141';
@@ -41,7 +42,7 @@ const PRODUCT = {
 };
 
 // ============================================
-// 🗄️ БАЗА ДАННЫХ (Neon) с ожиданием подключения
+// 🗄️ БАЗА ДАННЫХ (Neon)
 // ============================================
 let pool = null;
 let useDB = false;
@@ -69,7 +70,6 @@ async function initDB() {
             connectionTimeoutMillis: 10000
         });
         
-        // Проверяем подключение
         const client = await pool.connect();
         await client.query('SELECT 1');
         client.release();
@@ -151,6 +151,31 @@ function checkOwner(req, res, next) {
     if (req.session.userId === OWNER_DISCORD_ID) return next();
     res.status(403).sendFile(path.join(__dirname, 'forbidden.html'));
 }
+
+// ============================================
+// 📊 ОНЛАЙН ЧЕРЕЗ ПЛАГИН
+// ============================================
+let currentOnline = { online: 0, max: 99 };
+
+app.post('/api/online/update', (req, res) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== ONLINE_API_KEY) {
+        return res.status(403).json({ error: 'Неверный ключ' });
+    }
+    currentOnline = {
+        online: req.body.online || 0,
+        max: req.body.max || 99
+    };
+    console.log(`📊 Онлайн обновлён: ${currentOnline.online}/${currentOnline.max}`);
+    res.json({ success: true });
+});
+
+app.get('/api/server-status', (req, res) => {
+    res.json({
+        online: true,
+        players: { online: currentOnline.online, max: currentOnline.max }
+    });
+});
 
 // ============================================
 // 📦 ЗАКАЗЫ (PostgreSQL)
@@ -539,26 +564,6 @@ app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
-// ============================================
-// 📊 СТАТУСЫ
-// ============================================
-app.get('/api/server-status', async (req, res) => {
-    try {
-        const response = await fetch(`https://api.mcsrvstat.us/2/${SERVER_IP}:${SERVER_PORT}?${Date.now()}`);
-        const data = await response.json();
-        res.json({
-            online: data.online || false,
-            players: { 
-                online: data.players?.online || 0, 
-                max: data.players?.max || 99 
-            }
-        });
-    } catch (error) {
-        console.log('Ошибка получения статуса:', error.message);
-        res.json({ online: false, players: { online: 0, max: 99 } });
-    }
-});
-
 app.get('/api/user', (req, res) => {
     if (req.session.userId) {
         res.json({ authenticated: true, id: req.session.userId, username: req.session.username, role: req.session.userRole, level: req.session.userLevel });
@@ -742,7 +747,6 @@ app.get('/auth/callback', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 
 async function start() {
-    // Инициализируем БД без блокировки запуска
     initDB().then(() => {
         console.log('Инициализация БД завершена');
     }).catch(err => {
