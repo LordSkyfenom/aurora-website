@@ -5,7 +5,7 @@ const path = require('path');
 const https = require('https');
 const session = require('express-session');
 const fs = require('fs');
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 
 const TelegramBot = require('node-telegram-bot-api');
 
@@ -25,9 +25,9 @@ const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID;
 const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET;
 
-// База данных Beget
+// Supabase PostgreSQL
 const DB_HOST = process.env.DB_HOST;
-const DB_PORT = parseInt(process.env.DB_PORT) || 3306;
+const DB_PORT = parseInt(process.env.DB_PORT) || 5432;
 const DB_USER = process.env.DB_USER;
 const DB_PASSWORD = process.env.DB_PASSWORD;
 const DB_NAME = process.env.DB_NAME;
@@ -42,45 +42,39 @@ const PRODUCT = {
 };
 
 // ============================================
-// 🗄️ ПОДКЛЮЧЕНИЕ К БД (с отладкой)
+// 🗄️ ПОДКЛЮЧЕНИЕ К PostgreSQL
 // ============================================
 let pool;
 
 async function initDB() {
-    console.log('📡 Попытка подключения к MySQL...');
+    console.log('📡 Попытка подключения к PostgreSQL (Supabase)...');
     console.log(`DB_HOST: ${DB_HOST}`);
     console.log(`DB_PORT: ${DB_PORT}`);
     console.log(`DB_NAME: ${DB_NAME}`);
     console.log(`DB_USER: ${DB_USER}`);
-    console.log(`DB_PASSWORD: ${DB_PASSWORD ? '***' : '❌ не задан'}`);
     
     if (!DB_HOST || !DB_USER || !DB_PASSWORD) {
         console.error('❌ Ошибка: не все переменные БД заданы!');
         process.exit(1);
     }
     
-    pool = mysql.createPool({
+    pool = new Pool({
         host: DB_HOST,
         port: DB_PORT,
         user: DB_USER,
         password: DB_PASSWORD,
         database: DB_NAME,
-        waitForConnections: true,
-        connectionLimit: 5,
-        queueLimit: 0,
-        enableKeepAlive: true,
-        keepAliveInitialDelay: 10000,
-        connectTimeout: 10000
+        ssl: { rejectUnauthorized: false },
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000
     });
     
     try {
-        const connection = await pool.getConnection();
-        await connection.query('SET SESSION wait_timeout = 28800');
-        await connection.query('SET SESSION interactive_timeout = 28800');
-        connection.release();
-        
-        const [rows] = await pool.execute('SELECT 1');
-        console.log('✅ База данных MySQL подключена (Beget)');
+        const client = await pool.connect();
+        await client.query('SELECT 1');
+        client.release();
+        console.log('✅ PostgreSQL подключена (Supabase)');
     } catch (err) {
         console.error('❌ Ошибка подключения к БД:', err.message);
         throw err;
@@ -140,10 +134,10 @@ app.post('/api/create-order', checkAuth, async (req, res) => {
     if (!playerName) return res.status(400).json({ error: 'Укажите ник' });
     
     const orderId = Date.now().toString();
-    const createdAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const createdAt = new Date().toISOString();
     
-    await pool.execute(
-        'INSERT INTO orders (id, playerName, product, price, status, userId, userName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    await pool.query(
+        'INSERT INTO orders (id, playerName, product, price, status, userId, userName, createdAt) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
         [orderId, playerName, PRODUCT.name, PRODUCT.price, 'pending', req.session.userId, req.session.username, createdAt]
     );
     
@@ -153,24 +147,24 @@ app.post('/api/create-order', checkAuth, async (req, res) => {
 });
 
 app.get('/api/order/:id', async (req, res) => {
-    const [rows] = await pool.execute('SELECT * FROM orders WHERE id = ?', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
-    res.json(rows[0]);
+    const result = await pool.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
+    res.json(result.rows[0]);
 });
 
 app.post('/api/confirm-order', checkAuth, async (req, res) => {
     const { orderId } = req.body;
     
-    const [rows] = await pool.execute('SELECT * FROM orders WHERE id = ? AND userId = ?', [orderId, req.session.userId]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
+    const result = await pool.query('SELECT * FROM orders WHERE id = $1 AND userId = $2', [orderId, req.session.userId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
     
-    const order = rows[0];
+    const order = result.rows[0];
     if (order.status !== 'pending') return res.status(400).json({ error: 'Заказ уже обработан' });
     
-    await pool.execute('UPDATE orders SET status = ? WHERE id = ?', ['awaiting_confirmation', orderId]);
+    await pool.query('UPDATE orders SET status = $1 WHERE id = $2', ['awaiting_confirmation', orderId]);
     
     if (bot && ADMIN_CHAT_ID) {
-        bot.sendMessage(ADMIN_CHAT_ID, `🆕 Новая покупка!\n👤 Игрок: ${order.playerName}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}`);
+        bot.sendMessage(ADMIN_CHAT_ID, `🆕 Новая покупка!\n👤 Игрок: ${order.playername}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}`);
     }
     
     res.json({ success: true });
@@ -178,7 +172,7 @@ app.post('/api/confirm-order', checkAuth, async (req, res) => {
 
 app.post('/api/cancel-order', checkAuth, async (req, res) => {
     const { orderId } = req.body;
-    await pool.execute('UPDATE orders SET status = ? WHERE id = ? AND userId = ?', ['cancelled', orderId, req.session.userId]);
+    await pool.query('UPDATE orders SET status = $1 WHERE id = $2 AND userId = $3', ['cancelled', orderId, req.session.userId]);
     res.json({ success: true });
 });
 
@@ -187,29 +181,28 @@ app.post('/api/cancel-order', checkAuth, async (req, res) => {
 // ============================================
 
 app.get('/api/admin/orders', checkAuth, checkOwner, async (req, res) => {
-    const [rows] = await pool.execute('SELECT * FROM orders WHERE status = ? ORDER BY createdAt DESC', ['awaiting_confirmation']);
-    res.json(rows);
+    const result = await pool.query('SELECT * FROM orders WHERE status = $1 ORDER BY createdAt DESC', ['awaiting_confirmation']);
+    res.json(result.rows);
 });
 
 app.get('/api/admin/history', checkAuth, checkOwner, async (req, res) => {
-    const [rows] = await pool.execute('SELECT * FROM orders WHERE status IN (?, ?) ORDER BY createdAt DESC', ['completed', 'cancelled']);
-    res.json(rows);
+    const result = await pool.query('SELECT * FROM orders WHERE status IN ($1, $2) ORDER BY createdAt DESC', ['completed', 'cancelled']);
+    res.json(result.rows);
 });
 
 app.post('/api/admin/grant', checkAuth, checkOwner, async (req, res) => {
     const { orderId } = req.body;
     
-    const [rows] = await pool.execute('SELECT * FROM orders WHERE id = ? AND status = ?', [orderId, 'awaiting_confirmation']);
-    if (rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
+    const result = await pool.query('SELECT * FROM orders WHERE id = $1 AND status = $2', [orderId, 'awaiting_confirmation']);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
     
-    const order = rows[0];
-    await grantSponsor(order.playerName);
+    const order = result.rows[0];
+    await grantSponsor(order.playername);
     
-    const completedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    await pool.execute('UPDATE orders SET status = ?, completedAt = ? WHERE id = ?', ['completed', completedAt, orderId]);
+    await pool.query('UPDATE orders SET status = $1, completedAt = $2 WHERE id = $3', ['completed', new Date().toISOString(), orderId]);
     
     if (bot && ADMIN_CHAT_ID) {
-        bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы игроку ${order.playerName} (заказ #${orderId})`);
+        bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы игроку ${order.playername} (заказ #${orderId})`);
     }
     
     res.json({ success: true });
@@ -217,7 +210,7 @@ app.post('/api/admin/grant', checkAuth, checkOwner, async (req, res) => {
 
 app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
     const { orderId } = req.body;
-    await pool.execute('UPDATE orders SET status = ? WHERE id = ?', ['cancelled', orderId]);
+    await pool.query('UPDATE orders SET status = $1 WHERE id = $2', ['cancelled', orderId]);
     res.json({ success: true });
 });
 
@@ -226,23 +219,23 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 // ============================================
 
 app.get('/api/news', async (req, res) => {
-    const [rows] = await pool.execute('SELECT * FROM news ORDER BY createdAt DESC');
-    res.json(rows);
+    const result = await pool.query('SELECT * FROM news ORDER BY createdAt DESC');
+    res.json(result.rows);
 });
 
 app.post('/api/news', checkAuth, async (req, res) => {
     const { title, content } = req.body;
     const id = Date.now().toString();
-    const createdAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    await pool.execute(
-        'INSERT INTO news (id, title, content, authorId, authorName, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+    const createdAt = new Date().toISOString();
+    await pool.query(
+        'INSERT INTO news (id, title, content, authorId, authorName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
         [id, title, content, req.session.userId, req.session.username, createdAt]
     );
     res.json({ success: true });
 });
 
 app.delete('/api/news/:id', checkAuth, async (req, res) => {
-    await pool.execute('DELETE FROM news WHERE id = ?', [req.params.id]);
+    await pool.query('DELETE FROM news WHERE id = $1', [req.params.id]);
     res.json({ success: true });
 });
 
@@ -251,23 +244,23 @@ app.delete('/api/news/:id', checkAuth, async (req, res) => {
 // ============================================
 
 app.get('/api/cities', async (req, res) => {
-    const [rows] = await pool.execute('SELECT * FROM cities ORDER BY createdAt DESC');
-    res.json(rows);
+    const result = await pool.query('SELECT * FROM cities ORDER BY createdAt DESC');
+    res.json(result.rows);
 });
 
 app.post('/api/cities', checkAuth, async (req, res) => {
     const { name, description } = req.body;
     const id = Date.now().toString();
-    const createdAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    await pool.execute(
-        'INSERT INTO cities (id, name, description, ownerId, ownerName, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+    const createdAt = new Date().toISOString();
+    await pool.query(
+        'INSERT INTO cities (id, name, description, ownerId, ownerName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
         [id, name, description, req.session.userId, req.session.username, createdAt]
     );
     res.json({ success: true });
 });
 
 app.delete('/api/cities/:id', checkAuth, async (req, res) => {
-    await pool.execute('DELETE FROM cities WHERE id = ? AND ownerId = ?', [req.params.id, req.session.userId]);
+    await pool.query('DELETE FROM cities WHERE id = $1 AND ownerId = $2', [req.params.id, req.session.userId]);
     res.json({ success: true });
 });
 
@@ -276,24 +269,24 @@ app.delete('/api/cities/:id', checkAuth, async (req, res) => {
 // ============================================
 
 app.get('/api/friends/data', checkAuth, async (req, res) => {
-    const [rows] = await pool.execute('SELECT data FROM friends WHERE userId = ?', [req.session.userId]);
-    if (rows.length === 0) {
+    const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+    if (result.rows.length === 0) {
         res.json({ friends: [], messages: [] });
     } else {
-        res.json(rows[0].data);
+        res.json(result.rows[0].data);
     }
 });
 
 app.post('/api/friends/add', checkAuth, async (req, res) => {
     const { friendId } = req.body;
-    const [rows] = await pool.execute('SELECT data FROM friends WHERE userId = ?', [req.session.userId]);
-    let data = rows.length > 0 ? rows[0].data : { friends: [], messages: [] };
+    const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+    let data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
     
     if (!data.friends.includes(friendId)) {
         data.friends.push(friendId);
-        await pool.execute(
-            'INSERT INTO friends (userId, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = ?',
-            [req.session.userId, JSON.stringify(data), JSON.stringify(data)]
+        await pool.query(
+            'INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2',
+            [req.session.userId, data]
         );
     }
     res.json({ success: true });
@@ -304,20 +297,18 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
     const msg = { id: Date.now(), from: req.session.userId, fromName: req.session.username, to: toId, message, timestamp: new Date().toISOString() };
     
     // Сообщение отправителю
-    let [rows] = await pool.execute('SELECT data FROM friends WHERE userId = ?', [req.session.userId]);
-    let data = rows.length > 0 ? rows[0].data : { friends: [], messages: [] };
+    let result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+    let data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
     if (!data.messages) data.messages = [];
     data.messages.push(msg);
-    await pool.execute('INSERT INTO friends (userId, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = ?',
-        [req.session.userId, JSON.stringify(data), JSON.stringify(data)]);
+    await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [req.session.userId, data]);
     
     // Сообщение получателю
-    [rows] = await pool.execute('SELECT data FROM friends WHERE userId = ?', [toId]);
-    data = rows.length > 0 ? rows[0].data : { friends: [], messages: [] };
+    result = await pool.query('SELECT data FROM friends WHERE userId = $1', [toId]);
+    data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
     if (!data.messages) data.messages = [];
     data.messages.push(msg);
-    await pool.execute('INSERT INTO friends (userId, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = ?',
-        [toId, JSON.stringify(data), JSON.stringify(data)]);
+    await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [toId, data]);
     
     res.json({ success: true });
 });
@@ -327,16 +318,16 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
 // ============================================
 
 app.get('/api/forum', async (req, res) => {
-    const [rows] = await pool.execute('SELECT * FROM forum ORDER BY createdAt DESC');
-    res.json(rows);
+    const result = await pool.query('SELECT * FROM forum ORDER BY createdAt DESC');
+    res.json(result.rows);
 });
 
 app.post('/api/forum', checkAuth, async (req, res) => {
     const { title, content } = req.body;
     const id = Date.now().toString();
-    const createdAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    await pool.execute(
-        'INSERT INTO forum (id, title, content, authorId, authorName, createdAt, answers) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    const createdAt = new Date().toISOString();
+    await pool.query(
+        'INSERT INTO forum (id, title, content, authorId, authorName, createdAt, answers) VALUES ($1, $2, $3, $4, $5, $6, $7)',
         [id, title, content, req.session.userId, req.session.username, createdAt, '[]']
     );
     res.json({ success: true });
@@ -344,13 +335,13 @@ app.post('/api/forum', checkAuth, async (req, res) => {
 
 app.post('/api/forum/:id/answer', checkAuth, async (req, res) => {
     const { content } = req.body;
-    const [rows] = await pool.execute('SELECT answers FROM forum WHERE id = ?', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Пост не найден' });
+    const result = await pool.query('SELECT answers FROM forum WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Пост не найден' });
     
-    let answers = rows[0].answers || [];
+    let answers = result.rows[0].answers || [];
     answers.push({ id: Date.now(), authorId: req.session.userId, authorName: req.session.username, content, createdAt: new Date().toISOString() });
     
-    await pool.execute('UPDATE forum SET answers = ? WHERE id = ?', [JSON.stringify(answers), req.params.id]);
+    await pool.query('UPDATE forum SET answers = $1 WHERE id = $2', [answers, req.params.id]);
     res.json({ success: true });
 });
 
@@ -519,7 +510,7 @@ async function start() {
         console.log(`👑 Владелец ID: ${OWNER_DISCORD_ID || '❌'}`);
         console.log(`🤖 Telegram: ${TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
         console.log(`💳 ЮMoney: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
-        console.log(`🗄️ MySQL: ${DB_HOST ? '✅' : '❌'}`);
+        console.log(`🗄️ PostgreSQL: ${DB_HOST ? '✅' : '❌'}`);
     });
 }
 
