@@ -41,54 +41,24 @@ const PRODUCT = {
 // ============================================
 let pool = null;
 let useDB = false;
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
 
 async function initDB() {
     if (!DATABASE_URL) {
-        console.log('⚠️ DATABASE_URL не задана, используем JSON');
+        console.log('⚠️ DATABASE_URL не задана');
         return;
     }
-    
-    async function connect() {
-        try {
-            pool = new Pool({
-                connectionString: DATABASE_URL,
-                ssl: { rejectUnauthorized: false },
-                max: 10,
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 10000
-            });
-            
-            await pool.connect();
-            console.log('✅ PostgreSQL подключена');
-            useDB = true;
-            reconnectAttempts = 0;
-            
-            pool.on('error', (err) => {
-                console.error('❌ Ошибка пула БД:', err.message);
-                useDB = false;
-                setTimeout(() => reconnect(), 5000);
-            });
-            
-        } catch (err) {
-            console.error('⚠️ Ошибка подключения к БД:', err.message);
-            useDB = false;
-            setTimeout(() => reconnect(), 5000);
-        }
+    try {
+        pool = new Pool({
+            connectionString: DATABASE_URL,
+            ssl: { rejectUnauthorized: false }
+        });
+        await pool.connect();
+        console.log('✅ PostgreSQL подключена');
+        useDB = true;
+    } catch (err) {
+        console.error('❌ Ошибка БД:', err.message);
+        useDB = false;
     }
-    
-    async function reconnect() {
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            console.error('❌ Превышено количество попыток переподключения к БД');
-            return;
-        }
-        reconnectAttempts++;
-        console.log(`🔄 Попытка переподключения к БД (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-        await connect();
-    }
-    
-    await connect();
 }
 
 // ============================================
@@ -160,7 +130,7 @@ function checkOwner(req, res, next) {
 }
 
 // ============================================
-// 📦 ЗАКАЗЫ
+// 📦 ЗАКАЗЫ (PostgreSQL)
 // ============================================
 async function saveOrder(order) {
     if (useDB && pool) {
@@ -313,7 +283,7 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 });
 
 // ============================================
-// 📰 НОВОСТИ
+// 📰 НОВОСТИ (PostgreSQL)
 // ============================================
 app.get('/api/news', async (req, res) => {
     if (useDB && pool) {
@@ -353,7 +323,7 @@ app.delete('/api/news/:id', checkAuth, async (req, res) => {
 });
 
 // ============================================
-// 🏙️ ГОРОДА
+// 🏙️ ГОРОДА (PostgreSQL)
 // ============================================
 app.get('/api/cities', async (req, res) => {
     if (useDB && pool) {
@@ -412,7 +382,7 @@ app.delete('/api/cities/:id', checkAuth, async (req, res) => {
 });
 
 // ============================================
-// 👥 ДРУЗЬЯ
+// 👥 ДРУЗЬЯ (PostgreSQL)
 // ============================================
 app.get('/api/friends/data', checkAuth, async (req, res) => {
     if (useDB && pool) {
@@ -468,7 +438,7 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
 });
 
 // ============================================
-// 📝 ФОРУМ
+// 📝 ФОРУМ (PostgreSQL)
 // ============================================
 app.get('/api/forum', async (req, res) => {
     if (useDB && pool) {
