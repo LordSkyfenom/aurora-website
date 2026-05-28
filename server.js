@@ -367,14 +367,11 @@ app.delete('/api/cities/:id', checkAuth, async (req, res) => {
             if (result.rows.length === 0) {
                 return res.status(404).json({ error: 'Город не найден' });
             }
-            
             const dbOwnerId = String(result.rows[0].ownerid || result.rows[0].ownerId);
             const currentUserId = String(req.session.userId);
-            
             if (dbOwnerId !== currentUserId) {
                 return res.status(403).json({ error: 'Нет прав на удаление' });
             }
-            
             await pool.query('DELETE FROM cities WHERE id = $1', [req.params.id]);
             return res.json({ success: true });
         } catch (err) { 
@@ -400,7 +397,6 @@ app.get('/api/friends/data', checkAuth, async (req, res) => {
 
 app.post('/api/friends/add', checkAuth, async (req, res) => {
     const { friendId } = req.body;
-    
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
@@ -424,14 +420,12 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
     
     if (useDB && pool) {
         try {
-            // Сообщение отправителю
             let result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
             let data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
             if (!data.messages) data.messages = [];
             data.messages.push(msg);
             await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [req.session.userId, data]);
             
-            // Сообщение получателю
             result = await pool.query('SELECT data FROM friends WHERE userId = $1', [toId]);
             data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
             if (!data.messages) data.messages = [];
@@ -510,7 +504,7 @@ app.get('/admin', (req, res) => {
 // ============================================
 app.get('/api/server-status', async (req, res) => {
     try {
-        const response = await fetch('https://api.mcsrvstat.us/2/213.171.18.141:32803');
+        const response = await fetch('https://api.mcsrvstat.us/2/213.171.18.129:32471');
         const data = await response.json();
         res.json(data);
     } catch {
