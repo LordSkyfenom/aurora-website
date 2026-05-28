@@ -32,7 +32,7 @@ const RCON_PASSWORD = process.env.RCON_PASSWORD;
 // Товар
 const PRODUCT = {
     name: 'Поддержка сервера 🍪',
-    price: 10,
+    price: 200,
     commands: [
         'lp user {player} parent add sponsor'
     ]
