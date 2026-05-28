@@ -1,8 +1,6 @@
 {
   "name": "aurora-website",
   "version": "1.0.0",
-  "description": "Aurora Minecraft Server Website",
-  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
