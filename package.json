@@ -1,8 +1,6 @@
 {
   "name": "aurora-website",
   "version": "1.0.0",
-  "description": "Aurora Minecraft Server Website",
-  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
@@ -11,6 +9,7 @@
     "dotenv": "^16.3.1",
     "express-session": "^1.17.3",
     "pg": "^8.11.3",
+    "connect-pg-simple": "^9.0.0",
     "node-telegram-bot-api": "^0.64.0",
     "rcon": "^1.0.0"
   }
