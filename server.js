@@ -128,13 +128,12 @@ async function grantSponsor(playerName) {
 }
 
 // ============================================
-// 🛡️ MIDDLEWARE (СЕССИИ ДО ВСЕХ МАРШРУТОВ!)
+// 🛡️ MIDDLEWARE
 // ============================================
 app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// НАСТРОЙКА СЕССИЙ - ДО ВСЕХ МАРШРУТОВ
 app.use(session({
     secret: 'aurora-secret-key-2024',
     resave: false,
@@ -323,17 +322,47 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 });
 
 // ============================================
-// 📰 НОВОСТИ (JSON)
+// 📰 НОВОСТИ
 // ============================================
-app.get('/api/news', (req, res) => res.json(readJSON(NEWS_FILE)));
-app.post('/api/news', checkAuth, (req, res) => {
-    const { title, content } = req.body;
+app.get('/api/news', async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT * FROM news ORDER BY createdAt DESC');
+            return res.json(result.rows);
+        } catch (err) { console.error('DB news error:', err.message); }
+    }
     const news = readJSON(NEWS_FILE);
-    news.unshift({ id: Date.now(), title, content, authorId: req.session.userId, authorName: req.session.username, createdAt: new Date().toISOString() });
+    res.json(news);
+});
+
+app.post('/api/news', checkAuth, async (req, res) => {
+    const { title, content } = req.body;
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    
+    if (useDB && pool) {
+        try {
+            await pool.query(
+                'INSERT INTO news (id, title, content, authorId, authorName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
+                [id, title, content, req.session.userId, req.session.username, createdAt]
+            );
+            return res.json({ success: true });
+        } catch (err) { console.error('DB news insert error:', err.message); }
+    }
+    
+    const news = readJSON(NEWS_FILE);
+    news.unshift({ id, title, content, authorId: req.session.userId, authorName: req.session.username, createdAt });
     writeJSON(NEWS_FILE, news);
     res.json({ success: true });
 });
-app.delete('/api/news/:id', checkAuth, (req, res) => {
+
+app.delete('/api/news/:id', checkAuth, async (req, res) => {
+    if (useDB && pool) {
+        try {
+            await pool.query('DELETE FROM news WHERE id = $1', [req.params.id]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB news delete error:', err.message); }
+    }
     let news = readJSON(NEWS_FILE);
     news = news.filter(n => n.id != req.params.id);
     writeJSON(NEWS_FILE, news);
@@ -341,13 +370,22 @@ app.delete('/api/news/:id', checkAuth, (req, res) => {
 });
 
 // ============================================
-// 🏙️ ГОРОДА (JSON + PostgreSQL)
+// 🏙️ ГОРОДА (ИСПРАВЛЕННЫЕ)
 // ============================================
 app.get('/api/cities', async (req, res) => {
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT * FROM cities ORDER BY createdAt DESC');
-            return res.json(result.rows);
+            // Нормализуем ownerId в строку и приводим к единому формату
+            const cities = result.rows.map(city => ({
+                id: city.id,
+                name: city.name,
+                description: city.description,
+                ownerId: String(city.ownerid || city.ownerId),
+                ownerName: city.ownername || city.ownerName,
+                createdAt: city.createdat || city.createdAt
+            }));
+            return res.json(cities);
         } catch (err) { console.error('DB cities error:', err.message); }
     }
     const cities = readJSON(CITIES_FILE);
@@ -358,6 +396,8 @@ app.post('/api/cities', checkAuth, async (req, res) => {
     const { name, description } = req.body;
     const id = Date.now().toString();
     const createdAt = new Date().toISOString();
+    
+    console.log(`🏙️ Создание города, userId: ${req.session.userId}`);
     
     if (useDB && pool) {
         try {
@@ -375,21 +415,22 @@ app.post('/api/cities', checkAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-// ИСПРАВЛЕННОЕ УДАЛЕНИЕ ГОРОДА
 app.delete('/api/cities/:id', checkAuth, async (req, res) => {
     console.log(`🗑️ Удаление города ${req.params.id}, userId: ${req.session.userId}`);
     
     if (useDB && pool) {
         try {
-            const result = await pool.query('SELECT ownerId, ownerid FROM cities WHERE id = $1', [req.params.id]);
+            const result = await pool.query('SELECT ownerid, ownerId FROM cities WHERE id = $1', [req.params.id]);
             if (result.rows.length === 0) {
                 return res.status(404).json({ error: 'Город не найден' });
             }
             
-            const dbOwnerId = result.rows[0].ownerid || result.rows[0].ownerId;
-            console.log(`Сравнение: ${dbOwnerId} === ${req.session.userId}`);
+            const dbOwnerId = String(result.rows[0].ownerid || result.rows[0].ownerId);
+            const currentUserId = String(req.session.userId);
             
-            if (String(dbOwnerId) !== String(req.session.userId)) {
+            console.log(`Сравнение: ${dbOwnerId} === ${currentUserId}`);
+            
+            if (dbOwnerId !== currentUserId) {
                 return res.status(403).json({ error: 'Нет прав на удаление' });
             }
             
@@ -413,12 +454,13 @@ app.delete('/api/cities/:id', checkAuth, async (req, res) => {
 });
 
 // ============================================
-// 👥 ДРУЗЬЯ (JSON)
+// 👥 ДРУЗЬЯ
 // ============================================
 app.get('/api/friends/data', checkAuth, (req, res) => {
     const data = readJSON(FRIENDS_FILE);
     res.json(data[req.session.userId] || { friends: [], messages: [] });
 });
+
 app.post('/api/friends/add', checkAuth, (req, res) => {
     const { friendId } = req.body;
     const data = readJSON(FRIENDS_FILE);
@@ -431,6 +473,7 @@ app.post('/api/friends/add', checkAuth, (req, res) => {
     }
     res.json({ success: true });
 });
+
 app.post('/api/friends/message', checkAuth, (req, res) => {
     const { toId, message } = req.body;
     const data = readJSON(FRIENDS_FILE);
@@ -446,9 +489,13 @@ app.post('/api/friends/message', checkAuth, (req, res) => {
 });
 
 // ============================================
-// 📝 ФОРУМ (JSON)
+// 📝 ФОРУМ
 // ============================================
-app.get('/api/forum', (req, res) => res.json(readJSON(FORUM_FILE)));
+app.get('/api/forum', (req, res) => {
+    const forum = readJSON(FORUM_FILE);
+    res.json(forum);
+});
+
 app.post('/api/forum', checkAuth, (req, res) => {
     const { title, content } = req.body;
     const forum = readJSON(FORUM_FILE);
@@ -456,6 +503,7 @@ app.post('/api/forum', checkAuth, (req, res) => {
     writeJSON(FORUM_FILE, forum);
     res.json({ success: true });
 });
+
 app.post('/api/forum/:id/answer', checkAuth, (req, res) => {
     const { content } = req.body;
     const forum = readJSON(FORUM_FILE);
