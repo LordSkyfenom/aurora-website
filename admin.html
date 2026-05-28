@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ панель - Aurora</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .admin-container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 30px; border-bottom: 1px solid #3d434d; }
+        .tab { padding: 10px 20px; cursor: pointer; color: #919ba8; }
+        .tab.active { color: #2ecc2e; border-bottom: 2px solid #2ecc2e; }
+        .order-card { background: #20232b; border-radius: 16px; padding: 20px; margin-bottom: 15px; cursor: pointer; transition: all 0.2s; border-left: 3px solid #2ecc2e; }
+        .order-card:hover { transform: translateX(5px); background: #2a2f38; }
+        .order-id { color: #2ecc2e; font-size: 1rem; }
+        .order-info { color: #cbd0d6; margin: 5px 0; font-size: 0.9rem; }
+        
+        /* Модальное окно */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(6px); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-content { background: #20232b; border-radius: 24px; padding: 32px; width: 400px; max-width: 90%; border: 1px solid #2ecc2e; }
+        .modal-content h3 { color: #2ecc2e; margin-bottom: 20px; }
+        .modal-info { margin: 15px 0; color: #cbd0d6; }
+        .warning-text { color: #dc2626; font-weight: bold; font-size: 1.1rem; margin: 15px 0; }
+        .modal-buttons { display: flex; gap: 15px; margin-top: 25px; }
+        .btn-grant { background: #2ecc2e; color: #1a1d24; border: none; padding: 10px 20px; border-radius: 40px; cursor: pointer; flex: 1; }
+        .btn-reject { background: #dc2626; color: white; border: none; padding: 10px 20px; border-radius: 40px; cursor: pointer; flex: 1; }
+        .btn-close { background: #3d434d; color: white; border: none; padding: 10px 20px; border-radius: 40px; cursor: pointer; }
+        
+        .history-card { background: #20232b; border-radius: 16px; padding: 15px; margin-bottom: 10px; border-left: 3px solid #6b7482; }
+        .status-completed { color: #2ecc2e; }
+        .status-cancelled { color: #dc2626; }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <a href="/" class="back-link">← На главную</a>
+        <h1 style="color:#2ecc2e;">👑 Админ панель</h1>
+        
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('pending')">⏳ Ожидают выдачи</div>
+            <div class="tab" onclick="showTab('history')">📜 История</div>
+        </div>
+        
+        <div id="pendingPanel">
+            <div id="pendingOrders"></div>
+        </div>
+        
+        <div id="historyPanel" style="display: none;">
+            <div id="historyOrders"></div>
+        </div>
+    </div>
+    
+    <!-- Модальное окно -->
+    <div id="orderModal" class="modal">
+        <div class="modal-content">
+            <h3>📦 Информация о заказе</h3>
+            <div id="modalInfo"></div>
+            <div class="warning-text" id="warningText">⚠️ ПРОВЕРЬТЕ ОПЛАТУ</div>
+            <div class="modal-buttons" id="modalButtons">
+                <button class="btn-grant" onclick="processGrant()">✅ Выдать привилегию</button>
+                <button class="btn-reject" onclick="processCancel()">❌ Отменить заказ</button>
+            </div>
+            <div id="successMessage" style="display: none;">
+                <p style="color:#2ecc2e;">✅ Вы успешно выдали привилегию!</p>
+                <button class="btn-close" onclick="closeModal()">Закрыть</button>
+            </div>
+            <div id="cancelMessage" style="display: none;">
+                <p style="color:#dc2626;">❌ Заказ отменён</p>
+                <button class="btn-close" onclick="closeModal()">Закрыть</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentOrder = null;
+        
+        async function loadPendingOrders() {
+            const res = await fetch('/api/admin/orders');
+            const orders = await res.json();
+            const container = document.getElementById('pendingOrders');
+            
+            if (orders.length === 0) {
+                container.innerHTML = '<p style="color:#919ba8;">Нет заказов, ожидающих выдачи</p>';
+                return;
+            }
+            
+            container.innerHTML = orders.map(order => `
+                <div class="order-card" onclick="openOrderModal('${order.id}')">
+                    <div class="order-id">📦 Заказ #${order.id}</div>
+                    <div class="order-info">👤 Игрок: <strong>${order.playerName}</strong></div>
+                    <div class="order-info">📅 ${new Date(order.createdAt).toLocaleString()}</div>
+                </div>
+            `).join('');
+        }
+        
+        async function loadHistory() {
+            const res = await fetch('/api/admin/history');
+            const orders = await res.json();
+            const container = document.getElementById('historyOrders');
+            
+            if (orders.length === 0) {
+                container.innerHTML = '<p style="color:#919ba8;">История пуста</p>';
+                return;
+            }
+            
+            container.innerHTML = orders.map(order => `
+                <div class="history-card">
+                    <div class="order-id">📦 Заказ #${order.id}</div>
+                    <div class="order-info">👤 Игрок: ${order.playerName}</div>
+                    <div class="order-info">📦 Товар: ${order.product} | 💰 ${order.price}₽</div>
+                    <div class="order-info">📌 Статус: <span class="${order.status === 'completed' ? 'status-completed' : 'status-cancelled'}">${order.status === 'completed' ? '✅ Выполнен' : '❌ Отменён'}</span></div>
+                    <div class="order-info">📅 ${new Date(order.createdAt).toLocaleString()}</div>
+                </div>
+            `).join('');
+        }
+        
+        async function openOrderModal(orderId) {
+            const res = await fetch('/api/admin/orders');
+            const orders = await res.json();
+            currentOrder = orders.find(o => o.id === orderId);
+            
+            if (!currentOrder) return;
+            
+            document.getElementById('modalInfo').innerHTML = `
+                <div class="modal-info">🆔 Номер заказа: <strong>${currentOrder.id}</strong></div>
+                <div class="modal-info">👤 Имя игрока: <strong>${currentOrder.playerName}</strong></div>
+                <div class="modal-info">📦 Товар: ${currentOrder.product}</div>
+                <div class="modal-info">💰 Цена: ${currentOrder.price}₽</div>
+                <div class="modal-info">📅 Дата: ${new Date(currentOrder.createdAt).toLocaleString()}</div>
+                <div class="modal-info">📌 Статус: ⏳ Ожидает подтверждения</div>
+            `;
+            
+            document.getElementById('warningText').style.display = 'block';
+            document.getElementById('modalButtons').style.display = 'flex';
+            document.getElementById('successMessage').style.display = 'none';
+            document.getElementById('cancelMessage').style.display = 'none';
+            
+            document.getElementById('orderModal').style.display = 'flex';
+        }
+        
+        async function processGrant() {
+            if (!confirm(`Выдать привилегию игроку ${currentOrder.playerName}?`)) return;
+            
+            const res = await fetch('/api/admin/grant', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId: currentOrder.id })
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                document.getElementById('warningText').style.display = 'none';
+                document.getElementById('modalButtons').style.display = 'none';
+                document.getElementById('successMessage').style.display = 'block';
+                loadPendingOrders();
+                loadHistory();
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        }
+        
+        async function processCancel() {
+            if (!confirm(`Отменить заказ #${currentOrder.id}?`)) return;
+            
+            const res = await fetch('/api/admin/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId: currentOrder.id })
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                document.getElementById('warningText').style.display = 'none';
+                document.getElementById('modalButtons').style.display = 'none';
+                document.getElementById('cancelMessage').style.display = 'block';
+                loadPendingOrders();
+                loadHistory();
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        }
+        
+        function closeModal() {
+            document.getElementById('orderModal').style.display = 'none';
+            currentOrder = null;
+        }
+        
+        function showTab(tab) {
+            if (tab === 'pending') {
+                document.getElementById('pendingPanel').style.display = 'block';
+                document.getElementById('historyPanel').style.display = 'none';
+                document.querySelectorAll('.tab')[0].classList.add('active');
+                document.querySelectorAll('.tab')[1].classList.remove('active');
+                loadPendingOrders();
+            } else {
+                document.getElementById('pendingPanel').style.display = 'none';
+                document.getElementById('historyPanel').style.display = 'block';
+                document.querySelectorAll('.tab')[0].classList.remove('active');
+                document.querySelectorAll('.tab')[1].classList.add('active');
+                loadHistory();
+            }
+        }
+        
+        // Закрытие модалки при клике вне
+        window.onclick = (event) => {
+            const modal = document.getElementById('orderModal');
+            if (event.target === modal) closeModal();
+        };
+        
+        loadPendingOrders();
+        setInterval(loadPendingOrders, 10000);
+    </script>
+</body>
+</html>
