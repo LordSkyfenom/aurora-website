@@ -9,7 +9,6 @@ const https = require('https');
 const session = require('express-session');
 const fs = require('fs');
 const { Pool } = require('pg');
-const pgSession = require('connect-pg-simple')(session);
 
 const TelegramBot = require('node-telegram-bot-api');
 
@@ -38,7 +37,7 @@ const PRODUCT = {
 };
 
 // ============================================
-// 💾 JSON ХРАНИЛИЩЕ (только для резерва заказов)
+// 💾 JSON ХРАНИЛИЩЕ (резерв)
 // ============================================
 const DATA_DIR = path.join(__dirname, 'data');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
@@ -82,7 +81,7 @@ async function initDB() {
 }
 
 // ============================================
-// 🤖 TELEGRAM БОТ (webhook mode)
+// 🤖 TELEGRAM БОТ
 // ============================================
 let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
@@ -121,29 +120,11 @@ async function grantSponsor(playerName) {
 }
 
 // ============================================
-// 🛡️ MIDDLEWARE
+// 🛡️ MIDDLEWARE (кроме сессий — они будут после initDB)
 // ============================================
 app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.static(__dirname));
-
-// Настройка сессий с PostgreSQL
-app.use(session({
-    store: new pgSession({
-        pool: pool,
-        tableName: 'session',
-        createTableIfMissing: false
-    }),
-    secret: 'aurora-secret-key-2024',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { 
-        secure: false,
-        httpOnly: true, 
-        sameSite: 'lax', 
-        maxAge: 1000 * 60 * 60 * 24 * 7
-    }
-}));
 
 function checkAuth(req, res, next) {
     if (req.session.userId) return next();
@@ -440,14 +421,12 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
     
     if (useDB && pool) {
         try {
-            // Сообщение отправителю
             let result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
             let data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
             if (!data.messages) data.messages = [];
             data.messages.push(msg);
             await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [req.session.userId, data]);
             
-            // Сообщение получателю
             result = await pool.query('SELECT data FROM friends WHERE userId = $1', [toId]);
             data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
             if (!data.messages) data.messages = [];
@@ -719,6 +698,42 @@ const PORT = process.env.PORT || 3001;
 async function start() {
     await initDB();
     
+    // Настройка сессий ТОЛЬКО после подключения к БД
+    if (useDB && pool) {
+        const pgSession = require('connect-pg-simple')(session);
+        
+        app.use(session({
+            store: new pgSession({
+                pool: pool,
+                tableName: 'session',
+                createTableIfMissing: false
+            }),
+            secret: 'aurora-secret-key-2024',
+            resave: false,
+            saveUninitialized: false,
+            cookie: { 
+                secure: false,
+                httpOnly: true, 
+                sameSite: 'lax', 
+                maxAge: 1000 * 60 * 60 * 24 * 7
+            }
+        }));
+    } else {
+        // fallback на MemoryStore
+        app.use(session({
+            secret: 'aurora-secret-key-2024',
+            resave: false,
+            saveUninitialized: false,
+            cookie: { 
+                secure: false,
+                httpOnly: true, 
+                sameSite: 'lax', 
+                maxAge: 1000 * 60 * 60 * 24 * 7
+            }
+        }));
+    }
+    
+    // Telegram webhook
     if (bot && TELEGRAM_BOT_TOKEN) {
         const webhookUrl = `https://aurora-mc.onrender.com/webhook/telegram`;
         try {
