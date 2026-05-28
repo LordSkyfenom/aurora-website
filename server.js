@@ -1,5 +1,8 @@
 require('dotenv').config();
 
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 const express = require('express');
 const path = require('path');
 const https = require('https');
@@ -424,6 +427,16 @@ app.get('/api/user', (req, res) => {
     } else {
         res.json({ authenticated: false });
     }
+});
+
+// ============================================
+// 🧪 ТЕСТОВЫЙ МАРШРУТ ДЛЯ ПРОВЕРКИ БД
+// ============================================
+app.get('/api/db-status', (req, res) => {
+    res.json({ 
+        useDB: useDB,
+        message: useDB ? 'PostgreSQL подключена' : 'Используется JSON (резерв)'
+    });
 });
 
 // ============================================
