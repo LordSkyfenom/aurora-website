@@ -20,15 +20,21 @@
         .modal-content { background: #20232b; border-radius: 24px; padding: 32px; width: 400px; max-width: 90%; border: 1px solid #2ecc2e; }
         .modal-content h3 { color: #2ecc2e; margin-bottom: 20px; }
         .modal-info { margin: 15px 0; color: #cbd0d6; }
-        .warning-text { color: #dc2626; font-weight: bold; font-size: 1.1rem; margin: 15px 0; }
+        .warning-text { color: #dc2626; font-weight: bold; font-size: 1.1rem; margin: 15px 0; text-align: center; }
         .modal-buttons { display: flex; gap: 15px; margin-top: 25px; }
-        .btn-grant { background: #2ecc2e; color: #1a1d24; border: none; padding: 10px 20px; border-radius: 40px; cursor: pointer; flex: 1; }
-        .btn-reject { background: #dc2626; color: white; border: none; padding: 10px 20px; border-radius: 40px; cursor: pointer; flex: 1; }
-        .btn-close { background: #3d434d; color: white; border: none; padding: 10px 20px; border-radius: 40px; cursor: pointer; }
+        .btn-grant { background: #2ecc2e; color: #1a1d24; border: none; padding: 12px 20px; border-radius: 40px; cursor: pointer; flex: 1; font-weight: bold; }
+        .btn-reject { background: #dc2626; color: white; border: none; padding: 12px 20px; border-radius: 40px; cursor: pointer; flex: 1; font-weight: bold; }
+        .btn-close { background: #3d434d; color: white; border: none; padding: 10px 20px; border-radius: 40px; cursor: pointer; margin-top: 15px; width: 100%; }
+        .btn-grant:disabled { opacity: 0.5; cursor: not-allowed; }
         
         .history-card { background: #20232b; border-radius: 16px; padding: 15px; margin-bottom: 10px; border-left: 3px solid #6b7482; }
         .status-completed { color: #2ecc2e; }
         .status-cancelled { color: #dc2626; }
+        
+        .success-text { color: #2ecc2e; font-size: 1.2rem; text-align: center; margin: 20px 0; }
+        .cancel-text { color: #dc2626; font-size: 1.2rem; text-align: center; margin: 20px 0; }
+        
+        .back-link { display: inline-block; margin-bottom: 20px; color: #2ecc2e; text-decoration: none; }
     </style>
 </head>
 <body>
@@ -61,11 +67,11 @@
                 <button class="btn-reject" onclick="processCancel()">❌ Отменить заказ</button>
             </div>
             <div id="successMessage" style="display: none;">
-                <p style="color:#2ecc2e;">✅ Вы успешно выдали привилегию!</p>
+                <div class="success-text">✅ Вы успешно выдали привилегию!</div>
                 <button class="btn-close" onclick="closeModal()">Закрыть</button>
             </div>
             <div id="cancelMessage" style="display: none;">
-                <p style="color:#dc2626;">❌ Заказ отменён</p>
+                <div class="cancel-text">❌ Заказ отменён</div>
                 <button class="btn-close" onclick="closeModal()">Закрыть</button>
             </div>
         </div>
@@ -75,43 +81,51 @@
         let currentOrder = null;
         
         async function loadPendingOrders() {
-            const res = await fetch('/api/admin/orders');
-            const orders = await res.json();
-            const container = document.getElementById('pendingOrders');
-            
-            if (orders.length === 0) {
-                container.innerHTML = '<p style="color:#919ba8;">Нет заказов, ожидающих выдачи</p>';
-                return;
+            try {
+                const res = await fetch('/api/admin/orders');
+                const orders = await res.json();
+                const container = document.getElementById('pendingOrders');
+                
+                if (orders.length === 0) {
+                    container.innerHTML = '<p style="color:#919ba8;">Нет заказов, ожидающих выдачи</p>';
+                    return;
+                }
+                
+                container.innerHTML = orders.map(order => `
+                    <div class="order-card" onclick="openOrderModal('${order.id}')">
+                        <div class="order-id">📦 Заказ #${order.id}</div>
+                        <div class="order-info">👤 Игрок: <strong>${escapeHtml(order.playerName)}</strong></div>
+                        <div class="order-info">📅 ${new Date(order.createdAt).toLocaleString()}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Ошибка загрузки заказов:', error);
             }
-            
-            container.innerHTML = orders.map(order => `
-                <div class="order-card" onclick="openOrderModal('${order.id}')">
-                    <div class="order-id">📦 Заказ #${order.id}</div>
-                    <div class="order-info">👤 Игрок: <strong>${order.playerName}</strong></div>
-                    <div class="order-info">📅 ${new Date(order.createdAt).toLocaleString()}</div>
-                </div>
-            `).join('');
         }
         
         async function loadHistory() {
-            const res = await fetch('/api/admin/history');
-            const orders = await res.json();
-            const container = document.getElementById('historyOrders');
-            
-            if (orders.length === 0) {
-                container.innerHTML = '<p style="color:#919ba8;">История пуста</p>';
-                return;
+            try {
+                const res = await fetch('/api/admin/history');
+                const orders = await res.json();
+                const container = document.getElementById('historyOrders');
+                
+                if (orders.length === 0) {
+                    container.innerHTML = '<p style="color:#919ba8;">История пуста</p>';
+                    return;
+                }
+                
+                container.innerHTML = orders.map(order => `
+                    <div class="history-card">
+                        <div class="order-id">📦 Заказ #${order.id}</div>
+                        <div class="order-info">👤 Игрок: ${escapeHtml(order.playerName)}</div>
+                        <div class="order-info">📦 Товар: ${order.product} | 💰 ${order.price}₽</div>
+                        <div class="order-info">📌 Статус: <span class="${order.status === 'completed' ? 'status-completed' : 'status-cancelled'}">${order.status === 'completed' ? '✅ Выполнен' : '❌ Отменён'}</span></div>
+                        <div class="order-info">📅 ${new Date(order.createdAt).toLocaleString()}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Ошибка загрузки истории:', error);
             }
-            
-            container.innerHTML = orders.map(order => `
-                <div class="history-card">
-                    <div class="order-id">📦 Заказ #${order.id}</div>
-                    <div class="order-info">👤 Игрок: ${order.playerName}</div>
-                    <div class="order-info">📦 Товар: ${order.product} | 💰 ${order.price}₽</div>
-                    <div class="order-info">📌 Статус: <span class="${order.status === 'completed' ? 'status-completed' : 'status-cancelled'}">${order.status === 'completed' ? '✅ Выполнен' : '❌ Отменён'}</span></div>
-                    <div class="order-info">📅 ${new Date(order.createdAt).toLocaleString()}</div>
-                </div>
-            `).join('');
         }
         
         async function openOrderModal(orderId) {
@@ -123,7 +137,7 @@
             
             document.getElementById('modalInfo').innerHTML = `
                 <div class="modal-info">🆔 Номер заказа: <strong>${currentOrder.id}</strong></div>
-                <div class="modal-info">👤 Имя игрока: <strong>${currentOrder.playerName}</strong></div>
+                <div class="modal-info">👤 Имя игрока: <strong>${escapeHtml(currentOrder.playerName)}</strong></div>
                 <div class="modal-info">📦 Товар: ${currentOrder.product}</div>
                 <div class="modal-info">💰 Цена: ${currentOrder.price}₽</div>
                 <div class="modal-info">📅 Дата: ${new Date(currentOrder.createdAt).toLocaleString()}</div>
@@ -141,21 +155,40 @@
         async function processGrant() {
             if (!confirm(`Выдать привилегию игроку ${currentOrder.playerName}?`)) return;
             
-            const res = await fetch('/api/admin/grant', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orderId: currentOrder.id })
-            });
-            const data = await res.json();
+            // Показываем загрузку
+            const grantBtn = document.querySelector('.btn-grant');
+            const originalText = grantBtn.textContent;
+            grantBtn.textContent = '⏳ Выдача...';
+            grantBtn.disabled = true;
             
-            if (data.success) {
-                document.getElementById('warningText').style.display = 'none';
-                document.getElementById('modalButtons').style.display = 'none';
-                document.getElementById('successMessage').style.display = 'block';
-                loadPendingOrders();
-                loadHistory();
-            } else {
-                alert('❌ Ошибка: ' + data.error);
+            try {
+                const res = await fetch('/api/admin/grant', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ orderId: currentOrder.id })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    document.getElementById('warningText').style.display = 'none';
+                    document.getElementById('modalButtons').style.display = 'none';
+                    document.getElementById('successMessage').style.display = 'block';
+                    
+                    // Обновляем списки
+                    await loadPendingOrders();
+                    await loadHistory();
+                    
+                    console.log('✅ Привилегии выданы, заказ обновлён');
+                } else {
+                    alert('❌ Ошибка: ' + data.error);
+                    grantBtn.textContent = originalText;
+                    grantBtn.disabled = false;
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                alert('❌ Ошибка соединения с сервером');
+                grantBtn.textContent = originalText;
+                grantBtn.disabled = false;
             }
         }
         
@@ -173,8 +206,8 @@
                 document.getElementById('warningText').style.display = 'none';
                 document.getElementById('modalButtons').style.display = 'none';
                 document.getElementById('cancelMessage').style.display = 'block';
-                loadPendingOrders();
-                loadHistory();
+                await loadPendingOrders();
+                await loadHistory();
             } else {
                 alert('❌ Ошибка: ' + data.error);
             }
@@ -199,6 +232,12 @@
                 document.querySelectorAll('.tab')[1].classList.add('active');
                 loadHistory();
             }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
         
         // Закрытие модалки при клике вне
