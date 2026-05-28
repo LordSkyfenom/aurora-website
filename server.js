@@ -135,14 +135,35 @@ app.use(session({
     cookie: { secure: false, httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 24 * 7 }
 }));
 
+// Красивая страница ошибки
 function checkAuth(req, res, next) {
     if (req.session.userId) return next();
-    res.status(401).json({ error: 'Войдите через Discord' });
+    res.status(401).sendFile(path.join(__dirname, 'unauthorized.html'));
 }
 
 function checkOwner(req, res, next) {
     if (req.session.userId === OWNER_DISCORD_ID) return next();
-    res.status(403).json({ error: 'Доступ запрещён' });
+    res.status(403).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Нет прав - Aurora</title>
+            <style>
+                body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}
+                .error-box{text-align:center;background:#20232b;padding:40px;border-radius:28px;border:1px solid #ff4444;max-width:400px}
+                h1{color:#ff4444;margin-bottom:15px}
+                .back-link{color:#2ecc2e;text-decoration:none;display:inline-block;margin-top:20px}
+            </style>
+        </head>
+        <body>
+            <div class="error-box">
+                <h1>⛔ Нет прав</h1>
+                <p>У вас нет доступа к этой странице.</p>
+                <a href="/" class="back-link">← На главную</a>
+            </div>
+        </body>
+        </html>
+    `);
 }
 
 // ============================================
@@ -169,7 +190,6 @@ async function getOrder(orderId) {
             const res = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
             if (res.rows.length) {
                 const order = res.rows[0];
-                // Нормализуем имя поля (PostgreSQL возвращает userid)
                 order.userId = order.userid;
                 return order;
             }
@@ -429,8 +449,8 @@ app.get('/cities', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'v
 app.get('/friends', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'friends.html')));
 app.get('/forum', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'forum.html')));
 app.get('/admin', (req, res) => {
-    if (!req.session.userId) return res.send('<h1>Войдите через Discord</h1><a href="/">На главную</a>');
-    if (req.session.userId !== OWNER_DISCORD_ID) return res.status(403).send('<h1>Нет прав</h1>');
+    if (!req.session.userId) return res.sendFile(path.join(__dirname, 'unauthorized.html'));
+    if (req.session.userId !== OWNER_DISCORD_ID) return res.status(403).sendFile(path.join(__dirname, 'forbidden.html'));
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
