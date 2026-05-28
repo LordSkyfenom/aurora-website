@@ -128,11 +128,24 @@ async function grantSponsor(playerName) {
 }
 
 // ============================================
-// 🛡️ MIDDLEWARE
+// 🛡️ MIDDLEWARE (СЕССИИ ДО ВСЕХ МАРШРУТОВ!)
 // ============================================
 app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.static(__dirname));
+
+// НАСТРОЙКА СЕССИЙ - ДО ВСЕХ МАРШРУТОВ
+app.use(session({
+    secret: 'aurora-secret-key-2024',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { 
+        secure: false,
+        httpOnly: true, 
+        sameSite: 'lax', 
+        maxAge: 1000 * 60 * 60 * 24 * 7
+    }
+}));
 
 function checkAuth(req, res, next) {
     if (req.session.userId) return next();
@@ -310,7 +323,7 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 });
 
 // ============================================
-// 📰 НОВОСТИ (JSON пока)
+// 📰 НОВОСТИ (JSON)
 // ============================================
 app.get('/api/news', (req, res) => res.json(readJSON(NEWS_FILE)));
 app.post('/api/news', checkAuth, (req, res) => {
@@ -613,20 +626,6 @@ const PORT = process.env.PORT || 3001;
 async function start() {
     await initDB();
     
-    // Настройка сессий (простые, без PostgreSQL)
-    app.use(session({
-        secret: 'aurora-secret-key-2024',
-        resave: false,
-        saveUninitialized: false,
-        cookie: { 
-            secure: false,
-            httpOnly: true, 
-            sameSite: 'lax', 
-            maxAge: 1000 * 60 * 60 * 24 * 7
-        }
-    }));
-    
-    // Telegram webhook
     if (bot && TELEGRAM_BOT_TOKEN) {
         const webhookUrl = `https://aurora-mc.onrender.com/webhook/telegram`;
         try {
