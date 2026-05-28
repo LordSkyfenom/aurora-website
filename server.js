@@ -5,11 +5,6 @@ const path = require('path');
 const https = require('https');
 const session = require('express-session');
 const fs = require('fs');
-const { Pool } = require('pg');
-const dns = require('dns');
-
-// Принудительно используем IPv4 для подключения к БД
-dns.setDefaultResultOrder('ipv4first');
 
 const TelegramBot = require('node-telegram-bot-api');
 
@@ -29,13 +24,6 @@ const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID;
 const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET;
 
-// Supabase PostgreSQL
-const DB_HOST = process.env.DB_HOST;
-const DB_PORT = parseInt(process.env.DB_PORT) || 5432;
-const DB_USER = process.env.DB_USER;
-const DB_PASSWORD = process.env.DB_PASSWORD;
-const DB_NAME = process.env.DB_NAME;
-
 // Товар
 const PRODUCT = {
     name: 'Поддержка сервера 🍪',
@@ -46,44 +34,32 @@ const PRODUCT = {
 };
 
 // ============================================
-// 🗄️ ПОДКЛЮЧЕНИЕ К PostgreSQL (Supabase)
+// 💾 JSON ХРАНИЛИЩЕ
 // ============================================
-let pool;
+const DATA_DIR = path.join(__dirname, 'data');
+const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
+const NEWS_FILE = path.join(DATA_DIR, 'news.json');
+const CITIES_FILE = path.join(DATA_DIR, 'cities.json');
+const FRIENDS_FILE = path.join(DATA_DIR, 'friends.json');
+const FORUM_FILE = path.join(DATA_DIR, 'forum.json');
 
-async function initDB() {
-    console.log('📡 Попытка подключения к PostgreSQL (Supabase)...');
-    console.log(`DB_HOST: ${DB_HOST}`);
-    console.log(`DB_PORT: ${DB_PORT}`);
-    console.log(`DB_NAME: ${DB_NAME}`);
-    console.log(`DB_USER: ${DB_USER}`);
-    
-    if (!DB_HOST || !DB_USER || !DB_PASSWORD) {
-        console.error('❌ Ошибка: не все переменные БД заданы!');
-        process.exit(1);
-    }
-    
-    pool = new Pool({
-        host: DB_HOST,
-        port: DB_PORT,
-        user: DB_USER,
-        password: DB_PASSWORD,
-        database: DB_NAME,
-        ssl: { rejectUnauthorized: false },
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 30000
-    });
-    
-    try {
-        const client = await pool.connect();
-        await client.query('SELECT 1');
-        client.release();
-        console.log('✅ PostgreSQL подключена (Supabase)');
-    } catch (err) {
-        console.error('❌ Ошибка подключения к БД:', err.message);
-        throw err;
-    }
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+
+function readJSON(file, defaultData = []) {
+    if (!fs.existsSync(file)) return defaultData;
+    return JSON.parse(fs.readFileSync(file));
 }
+
+function writeJSON(file, data) {
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+// Инициализация JSON файлов
+if (!fs.existsSync(ORDERS_FILE)) writeJSON(ORDERS_FILE, []);
+if (!fs.existsSync(NEWS_FILE)) writeJSON(NEWS_FILE, []);
+if (!fs.existsSync(CITIES_FILE)) writeJSON(CITIES_FILE, []);
+if (!fs.existsSync(FRIENDS_FILE)) writeJSON(FRIENDS_FILE, {});
+if (!fs.existsSync(FORUM_FILE)) writeJSON(FORUM_FILE, []);
 
 // ============================================
 // 🤖 TELEGRAM БОТ
@@ -133,50 +109,63 @@ function checkOwner(req, res, next) {
 // 📦 API ЗАКАЗОВ
 // ============================================
 
-app.post('/api/create-order', checkAuth, async (req, res) => {
+app.post('/api/create-order', checkAuth, (req, res) => {
     const { playerName } = req.body;
     if (!playerName) return res.status(400).json({ error: 'Укажите ник' });
     
-    const orderId = Date.now().toString();
-    const createdAt = new Date().toISOString();
+    const orders = readJSON(ORDERS_FILE);
+    const newOrder = {
+        id: Date.now().toString(),
+        playerName,
+        product: PRODUCT.name,
+        price: PRODUCT.price,
+        status: 'pending',
+        userId: req.session.userId,
+        userName: req.session.username,
+        createdAt: new Date().toISOString()
+    };
+    orders.push(newOrder);
+    writeJSON(ORDERS_FILE, orders);
     
-    await pool.query(
-        'INSERT INTO orders (id, playerName, product, price, status, userId, userName, createdAt) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-        [orderId, playerName, PRODUCT.name, PRODUCT.price, 'pending', req.session.userId, req.session.username, createdAt]
-    );
+    const paymentUrl = `https://yoomoney.ru/quickpay/confirm.xml?receiver=${YOOMONEY_WALLET}&quickpay-form=shop&targets=Покупка+${encodeURIComponent(PRODUCT.name)}+для+${playerName}&sum=${PRODUCT.price}&paymentType=AC&label=${newOrder.id}`;
     
-    const paymentUrl = `https://yoomoney.ru/quickpay/confirm.xml?receiver=${YOOMONEY_WALLET}&quickpay-form=shop&targets=Покупка+${encodeURIComponent(PRODUCT.name)}+для+${playerName}&sum=${PRODUCT.price}&paymentType=AC&label=${orderId}`;
-    
-    res.json({ success: true, orderId, paymentUrl });
+    res.json({ success: true, orderId: newOrder.id, paymentUrl });
 });
 
-app.get('/api/order/:id', async (req, res) => {
-    const result = await pool.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
-    res.json(result.rows[0]);
+app.get('/api/order/:id', (req, res) => {
+    const orders = readJSON(ORDERS_FILE);
+    const order = orders.find(o => o.id === req.params.id);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    res.json(order);
 });
 
-app.post('/api/confirm-order', checkAuth, async (req, res) => {
+app.post('/api/confirm-order', checkAuth, (req, res) => {
     const { orderId } = req.body;
+    const orders = readJSON(ORDERS_FILE);
+    const order = orders.find(o => o.id === orderId);
     
-    const result = await pool.query('SELECT * FROM orders WHERE id = $1 AND userId = $2', [orderId, req.session.userId]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
-    
-    const order = result.rows[0];
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    if (order.userId !== req.session.userId) return res.status(403).json({ error: 'Не ваш заказ' });
     if (order.status !== 'pending') return res.status(400).json({ error: 'Заказ уже обработан' });
     
-    await pool.query('UPDATE orders SET status = $1 WHERE id = $2', ['awaiting_confirmation', orderId]);
+    order.status = 'awaiting_confirmation';
+    writeJSON(ORDERS_FILE, orders);
     
     if (bot && ADMIN_CHAT_ID) {
-        bot.sendMessage(ADMIN_CHAT_ID, `🆕 Новая покупка!\n👤 Игрок: ${order.playername}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}`);
+        bot.sendMessage(ADMIN_CHAT_ID, `🆕 Новая покупка!\n👤 Игрок: ${order.playerName}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}`);
     }
     
     res.json({ success: true });
 });
 
-app.post('/api/cancel-order', checkAuth, async (req, res) => {
+app.post('/api/cancel-order', checkAuth, (req, res) => {
     const { orderId } = req.body;
-    await pool.query('UPDATE orders SET status = $1 WHERE id = $2 AND userId = $3', ['cancelled', orderId, req.session.userId]);
+    const orders = readJSON(ORDERS_FILE);
+    const order = orders.find(o => o.id === orderId);
+    if (order && order.userId === req.session.userId) {
+        order.status = 'cancelled';
+        writeJSON(ORDERS_FILE, orders);
+    }
     res.json({ success: true });
 });
 
@@ -184,37 +173,45 @@ app.post('/api/cancel-order', checkAuth, async (req, res) => {
 // 👑 АДМИН ПАНЕЛЬ API
 // ============================================
 
-app.get('/api/admin/orders', checkAuth, checkOwner, async (req, res) => {
-    const result = await pool.query('SELECT * FROM orders WHERE status = $1 ORDER BY createdAt DESC', ['awaiting_confirmation']);
-    res.json(result.rows);
+app.get('/api/admin/orders', checkAuth, checkOwner, (req, res) => {
+    const orders = readJSON(ORDERS_FILE);
+    const pendingOrders = orders.filter(o => o.status === 'awaiting_confirmation');
+    res.json(pendingOrders);
 });
 
-app.get('/api/admin/history', checkAuth, checkOwner, async (req, res) => {
-    const result = await pool.query('SELECT * FROM orders WHERE status IN ($1, $2) ORDER BY createdAt DESC', ['completed', 'cancelled']);
-    res.json(result.rows);
+app.get('/api/admin/history', checkAuth, checkOwner, (req, res) => {
+    const orders = readJSON(ORDERS_FILE);
+    const history = orders.filter(o => o.status === 'completed' || o.status === 'cancelled');
+    res.json(history);
 });
 
 app.post('/api/admin/grant', checkAuth, checkOwner, async (req, res) => {
     const { orderId } = req.body;
+    const orders = readJSON(ORDERS_FILE);
+    const order = orders.find(o => o.id === orderId);
     
-    const result = await pool.query('SELECT * FROM orders WHERE id = $1 AND status = $2', [orderId, 'awaiting_confirmation']);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Заказ не найден' });
+    if (!order || order.status !== 'awaiting_confirmation') return res.status(404).json({ error: 'Заказ не найден' });
     
-    const order = result.rows[0];
-    await grantSponsor(order.playername);
-    
-    await pool.query('UPDATE orders SET status = $1, completedAt = $2 WHERE id = $3', ['completed', new Date().toISOString(), orderId]);
+    await grantSponsor(order.playerName);
+    order.status = 'completed';
+    order.completedAt = new Date().toISOString();
+    writeJSON(ORDERS_FILE, orders);
     
     if (bot && ADMIN_CHAT_ID) {
-        bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы игроку ${order.playername} (заказ #${orderId})`);
+        bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы игроку ${order.playerName} (заказ #${orderId})`);
     }
     
     res.json({ success: true });
 });
 
-app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
+app.post('/api/admin/cancel', checkAuth, checkOwner, (req, res) => {
     const { orderId } = req.body;
-    await pool.query('UPDATE orders SET status = $1 WHERE id = $2', ['cancelled', orderId]);
+    const orders = readJSON(ORDERS_FILE);
+    const order = orders.find(o => o.id === orderId);
+    if (order && order.status === 'awaiting_confirmation') {
+        order.status = 'cancelled';
+        writeJSON(ORDERS_FILE, orders);
+    }
     res.json({ success: true });
 });
 
@@ -222,24 +219,23 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 // 📰 API НОВОСТИ
 // ============================================
 
-app.get('/api/news', async (req, res) => {
-    const result = await pool.query('SELECT * FROM news ORDER BY createdAt DESC');
-    res.json(result.rows);
+app.get('/api/news', (req, res) => {
+    const news = readJSON(NEWS_FILE);
+    res.json(news);
 });
 
-app.post('/api/news', checkAuth, async (req, res) => {
+app.post('/api/news', checkAuth, (req, res) => {
     const { title, content } = req.body;
-    const id = Date.now().toString();
-    const createdAt = new Date().toISOString();
-    await pool.query(
-        'INSERT INTO news (id, title, content, authorId, authorName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
-        [id, title, content, req.session.userId, req.session.username, createdAt]
-    );
+    const news = readJSON(NEWS_FILE);
+    news.unshift({ id: Date.now(), title, content, authorId: req.session.userId, authorName: req.session.username, createdAt: new Date().toISOString() });
+    writeJSON(NEWS_FILE, news);
     res.json({ success: true });
 });
 
-app.delete('/api/news/:id', checkAuth, async (req, res) => {
-    await pool.query('DELETE FROM news WHERE id = $1', [req.params.id]);
+app.delete('/api/news/:id', checkAuth, (req, res) => {
+    let news = readJSON(NEWS_FILE);
+    news = news.filter(n => n.id !== req.params.id);
+    writeJSON(NEWS_FILE, news);
     res.json({ success: true });
 });
 
@@ -247,24 +243,23 @@ app.delete('/api/news/:id', checkAuth, async (req, res) => {
 // 🏙️ API ГОРОДА
 // ============================================
 
-app.get('/api/cities', async (req, res) => {
-    const result = await pool.query('SELECT * FROM cities ORDER BY createdAt DESC');
-    res.json(result.rows);
+app.get('/api/cities', (req, res) => {
+    const cities = readJSON(CITIES_FILE);
+    res.json(cities);
 });
 
-app.post('/api/cities', checkAuth, async (req, res) => {
+app.post('/api/cities', checkAuth, (req, res) => {
     const { name, description } = req.body;
-    const id = Date.now().toString();
-    const createdAt = new Date().toISOString();
-    await pool.query(
-        'INSERT INTO cities (id, name, description, ownerId, ownerName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
-        [id, name, description, req.session.userId, req.session.username, createdAt]
-    );
+    const cities = readJSON(CITIES_FILE);
+    cities.push({ id: Date.now(), name, description, ownerId: req.session.userId, ownerName: req.session.username, createdAt: new Date().toISOString() });
+    writeJSON(CITIES_FILE, cities);
     res.json({ success: true });
 });
 
-app.delete('/api/cities/:id', checkAuth, async (req, res) => {
-    await pool.query('DELETE FROM cities WHERE id = $1 AND ownerId = $2', [req.params.id, req.session.userId]);
+app.delete('/api/cities/:id', checkAuth, (req, res) => {
+    let cities = readJSON(CITIES_FILE);
+    cities = cities.filter(c => c.id !== req.params.id || c.ownerId !== req.session.userId);
+    writeJSON(CITIES_FILE, cities);
     res.json({ success: true });
 });
 
@@ -272,48 +267,35 @@ app.delete('/api/cities/:id', checkAuth, async (req, res) => {
 // 👥 API ДРУЗЬЯ
 // ============================================
 
-app.get('/api/friends/data', checkAuth, async (req, res) => {
-    const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
-    if (result.rows.length === 0) {
-        res.json({ friends: [], messages: [] });
-    } else {
-        res.json(result.rows[0].data);
-    }
+app.get('/api/friends/data', checkAuth, (req, res) => {
+    const data = readJSON(FRIENDS_FILE);
+    res.json(data[req.session.userId] || { friends: [], messages: [] });
 });
 
-app.post('/api/friends/add', checkAuth, async (req, res) => {
+app.post('/api/friends/add', checkAuth, (req, res) => {
     const { friendId } = req.body;
-    const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
-    let data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
-    
-    if (!data.friends.includes(friendId)) {
-        data.friends.push(friendId);
-        await pool.query(
-            'INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2',
-            [req.session.userId, data]
-        );
+    const data = readJSON(FRIENDS_FILE);
+    if (!data[req.session.userId]) data[req.session.userId] = { friends: [], messages: [] };
+    if (!data[req.session.userId].friends.includes(friendId)) {
+        data[req.session.userId].friends.push(friendId);
+        if (!data[friendId]) data[friendId] = { friends: [], messages: [] };
+        if (!data[friendId].friends.includes(req.session.userId)) data[friendId].friends.push(req.session.userId);
+        writeJSON(FRIENDS_FILE, data);
     }
     res.json({ success: true });
 });
 
-app.post('/api/friends/message', checkAuth, async (req, res) => {
+app.post('/api/friends/message', checkAuth, (req, res) => {
     const { toId, message } = req.body;
+    const data = readJSON(FRIENDS_FILE);
     const msg = { id: Date.now(), from: req.session.userId, fromName: req.session.username, to: toId, message, timestamp: new Date().toISOString() };
-    
-    // Сообщение отправителю
-    let result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
-    let data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
-    if (!data.messages) data.messages = [];
-    data.messages.push(msg);
-    await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [req.session.userId, data]);
-    
-    // Сообщение получателю
-    result = await pool.query('SELECT data FROM friends WHERE userId = $1', [toId]);
-    data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
-    if (!data.messages) data.messages = [];
-    data.messages.push(msg);
-    await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [toId, data]);
-    
+    if (!data[req.session.userId]) data[req.session.userId] = { friends: [], messages: [] };
+    if (!data[req.session.userId].messages) data[req.session.userId].messages = [];
+    data[req.session.userId].messages.push(msg);
+    if (!data[toId]) data[toId] = { friends: [], messages: [] };
+    if (!data[toId].messages) data[toId].messages = [];
+    data[toId].messages.push(msg);
+    writeJSON(FRIENDS_FILE, data);
     res.json({ success: true });
 });
 
@@ -321,32 +303,28 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
 // 📝 API ФОРУМ
 // ============================================
 
-app.get('/api/forum', async (req, res) => {
-    const result = await pool.query('SELECT * FROM forum ORDER BY createdAt DESC');
-    res.json(result.rows);
+app.get('/api/forum', (req, res) => {
+    const forum = readJSON(FORUM_FILE);
+    res.json(forum);
 });
 
-app.post('/api/forum', checkAuth, async (req, res) => {
+app.post('/api/forum', checkAuth, (req, res) => {
     const { title, content } = req.body;
-    const id = Date.now().toString();
-    const createdAt = new Date().toISOString();
-    await pool.query(
-        'INSERT INTO forum (id, title, content, authorId, authorName, createdAt, answers) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [id, title, content, req.session.userId, req.session.username, createdAt, '[]']
-    );
+    const forum = readJSON(FORUM_FILE);
+    forum.push({ id: Date.now(), title, content, authorId: req.session.userId, authorName: req.session.username, createdAt: new Date().toISOString(), answers: [] });
+    writeJSON(FORUM_FILE, forum);
     res.json({ success: true });
 });
 
-app.post('/api/forum/:id/answer', checkAuth, async (req, res) => {
+app.post('/api/forum/:id/answer', checkAuth, (req, res) => {
     const { content } = req.body;
-    const result = await pool.query('SELECT answers FROM forum WHERE id = $1', [req.params.id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Пост не найден' });
-    
-    let answers = result.rows[0].answers || [];
-    answers.push({ id: Date.now(), authorId: req.session.userId, authorName: req.session.username, content, createdAt: new Date().toISOString() });
-    
-    await pool.query('UPDATE forum SET answers = $1 WHERE id = $2', [answers, req.params.id]);
-    res.json({ success: true });
+    const forum = readJSON(FORUM_FILE);
+    const post = forum.find(p => p.id === req.params.id);
+    if (post) {
+        post.answers.push({ id: Date.now(), authorId: req.session.userId, authorName: req.session.username, content, createdAt: new Date().toISOString() });
+        writeJSON(FORUM_FILE, forum);
+        res.json({ success: true });
+    } else res.status(404).json({ error: 'Пост не найден' });
 });
 
 // ============================================
@@ -498,24 +476,12 @@ app.get('/auth/callback', async (req, res) => {
 // 🚀 ЗАПУСК
 // ============================================
 const PORT = process.env.PORT || 3001;
-
-async function start() {
-    try {
-        await initDB();
-    } catch (err) {
-        console.error('❌ Критическая ошибка: не удалось подключиться к БД');
-        process.exit(1);
-    }
-    app.listen(PORT, () => {
-        console.log('='.repeat(50));
-        console.log('🚀 Aurora Server запущен!');
-        console.log(`📍 http://localhost:${PORT}`);
-        console.log('='.repeat(50));
-        console.log(`👑 Владелец ID: ${OWNER_DISCORD_ID || '❌'}`);
-        console.log(`🤖 Telegram: ${TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
-        console.log(`💳 ЮMoney: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
-        console.log(`🗄️ PostgreSQL: ${DB_HOST ? '✅' : '❌'}`);
-    });
-}
-
-start();
+app.listen(PORT, () => {
+    console.log('='.repeat(50));
+    console.log('🚀 Aurora Server запущен!');
+    console.log(`📍 http://localhost:${PORT}`);
+    console.log('='.repeat(50));
+    console.log(`👑 Владелец ID: ${OWNER_DISCORD_ID || '❌'}`);
+    console.log(`🤖 Telegram: ${TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
+    console.log(`💳 ЮMoney: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
+});
