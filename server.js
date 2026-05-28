@@ -28,7 +28,7 @@ const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID;
 const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET;
 
-// Supabase PostgreSQL
+// Neon Tech PostgreSQL
 const DATABASE_URL = process.env.DATABASE_URL;
 
 // Товар
@@ -69,7 +69,7 @@ if (!fs.existsSync(FRIENDS_FILE)) writeJSON(FRIENDS_FILE, {});
 if (!fs.existsSync(FORUM_FILE)) writeJSON(FORUM_FILE, []);
 
 // ============================================
-// 🗄️ ПОДКЛЮЧЕНИЕ К PostgreSQL
+// 🗄️ ПОДКЛЮЧЕНИЕ К PostgreSQL (Neon Tech)
 // ============================================
 let pool = null;
 let useDB = false;
@@ -89,7 +89,7 @@ async function initDB() {
         const client = await pool.connect();
         await client.query('SELECT 1');
         client.release();
-        console.log('✅ PostgreSQL подключена (Supabase)');
+        console.log('✅ PostgreSQL подключена (Neon Tech)');
         useDB = true;
     } catch (err) {
         console.error('⚠️ Ошибка подключения к БД:', err.message);
@@ -627,7 +627,7 @@ app.get('/api/user', (req, res) => {
 app.get('/api/db-status', (req, res) => {
     res.json({ 
         useDB: useDB,
-        message: useDB ? 'PostgreSQL подключена' : 'Используется JSON (резерв)'
+        message: useDB ? 'PostgreSQL подключена (Neon)' : 'Используется JSON (резерв)'
     });
 });
 
@@ -744,7 +744,7 @@ async function start() {
         console.log(`👑 Владелец ID: ${OWNER_DISCORD_ID || '❌'}`);
         console.log(`🤖 Telegram: ${TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
         console.log(`💳 ЮMoney: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
-        console.log(`🗄️ Режим: ${useDB ? 'PostgreSQL' : 'JSON (резерв)'}`);
+        console.log(`🗄️ Режим: ${useDB ? 'PostgreSQL (Neon)' : 'JSON (резерв)'}`);
     });
 }
 
