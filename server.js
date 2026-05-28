@@ -42,7 +42,7 @@ const PRODUCT = {
 };
 
 // ============================================
-// 🗄️ ПОДКЛЮЧЕНИЕ К БД
+// 🗄️ ПОДКЛЮЧЕНИЕ К БД (с увеличенным wait_timeout)
 // ============================================
 let pool;
 
@@ -60,6 +60,12 @@ async function initDB() {
         keepAliveInitialDelay: 10000,
         connectTimeout: 10000
     });
+    
+    // Увеличиваем wait_timeout для сессии (решение от поддержки Beget)
+    const connection = await pool.getConnection();
+    await connection.query('SET SESSION wait_timeout = 28800');
+    await connection.query('SET SESSION interactive_timeout = 28800');
+    connection.release();
     
     const [rows] = await pool.execute('SELECT 1');
     console.log('✅ База данных MySQL подключена (Beget)');
