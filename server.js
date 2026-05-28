@@ -504,17 +504,17 @@ app.get('/admin', (req, res) => {
 });
 
 // ============================================
-// 📊 СТАТУСЫ (с альтернативным API)
+// 📊 СТАТУСЫ
 // ============================================
 app.get('/api/server-status', async (req, res) => {
     try {
-        // Используем альтернативный API mineatar.io
-        const response = await fetch(`https://api.mineatar.io/status/${SERVER_IP}:${SERVER_PORT}`);
+        // Используем mcapi.us (работает через ping)
+        const response = await fetch(`https://mcapi.us/server/status?ip=${SERVER_IP}&port=${SERVER_PORT}`);
         const data = await response.json();
         res.json({
             online: data.online || false,
             players: { 
-                online: data.players?.online || 0, 
+                online: data.players?.now || 0, 
                 max: data.players?.max || 99 
             }
         });
