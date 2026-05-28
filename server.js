@@ -341,19 +341,73 @@ app.delete('/api/news/:id', checkAuth, (req, res) => {
 });
 
 // ============================================
-// 🏙️ ГОРОДА (JSON)
+// 🏙️ ГОРОДА (JSON + PostgreSQL)
 // ============================================
-app.get('/api/cities', (req, res) => res.json(readJSON(CITIES_FILE)));
-app.post('/api/cities', checkAuth, (req, res) => {
-    const { name, description } = req.body;
+app.get('/api/cities', async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT * FROM cities ORDER BY createdAt DESC');
+            return res.json(result.rows);
+        } catch (err) { console.error('DB cities error:', err.message); }
+    }
     const cities = readJSON(CITIES_FILE);
-    cities.push({ id: Date.now(), name, description, ownerId: req.session.userId, ownerName: req.session.username, createdAt: new Date().toISOString() });
+    res.json(cities);
+});
+
+app.post('/api/cities', checkAuth, async (req, res) => {
+    const { name, description } = req.body;
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    
+    if (useDB && pool) {
+        try {
+            await pool.query(
+                'INSERT INTO cities (id, name, description, ownerId, ownerName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
+                [id, name, description, req.session.userId, req.session.username, createdAt]
+            );
+            return res.json({ success: true });
+        } catch (err) { console.error('DB cities insert error:', err.message); }
+    }
+    
+    const cities = readJSON(CITIES_FILE);
+    cities.push({ id, name, description, ownerId: req.session.userId, ownerName: req.session.username, createdAt });
     writeJSON(CITIES_FILE, cities);
     res.json({ success: true });
 });
-app.delete('/api/cities/:id', checkAuth, (req, res) => {
+
+// ИСПРАВЛЕННОЕ УДАЛЕНИЕ ГОРОДА
+app.delete('/api/cities/:id', checkAuth, async (req, res) => {
+    console.log(`🗑️ Удаление города ${req.params.id}, userId: ${req.session.userId}`);
+    
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT ownerId, ownerid FROM cities WHERE id = $1', [req.params.id]);
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Город не найден' });
+            }
+            
+            const dbOwnerId = result.rows[0].ownerid || result.rows[0].ownerId;
+            console.log(`Сравнение: ${dbOwnerId} === ${req.session.userId}`);
+            
+            if (String(dbOwnerId) !== String(req.session.userId)) {
+                return res.status(403).json({ error: 'Нет прав на удаление' });
+            }
+            
+            await pool.query('DELETE FROM cities WHERE id = $1', [req.params.id]);
+            return res.json({ success: true });
+        } catch (err) { 
+            console.error('DB cities delete error:', err.message); 
+        }
+    }
+    
+    // JSON резерв
     let cities = readJSON(CITIES_FILE);
-    cities = cities.filter(c => c.id != req.params.id || c.ownerId !== req.session.userId);
+    const city = cities.find(c => c.id == req.params.id);
+    if (!city) return res.status(404).json({ error: 'Город не найден' });
+    if (String(city.ownerId) !== String(req.session.userId)) {
+        return res.status(403).json({ error: 'Нет прав на удаление' });
+    }
+    cities = cities.filter(c => c.id != req.params.id);
     writeJSON(CITIES_FILE, cities);
     res.json({ success: true });
 });
