@@ -37,7 +37,7 @@ const PRODUCT = {
 };
 
 // ============================================
-// 💾 ХРАНИЛИЩЕ
+// 💾 ХРАНИЛИЩЕ (JSON резерв)
 // ============================================
 const DATA_DIR = path.join(__dirname, 'data');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
@@ -64,14 +64,14 @@ if (!fs.existsSync(FRIENDS_FILE)) writeJSON(FRIENDS_FILE, {});
 if (!fs.existsSync(FORUM_FILE)) writeJSON(FORUM_FILE, []);
 
 // ============================================
-// 🗄️ БАЗА ДАННЫХ
+// 🗄️ БАЗА ДАННЫХ (Neon)
 // ============================================
 let pool = null;
 let useDB = false;
 
 async function initDB() {
     if (!DATABASE_URL) {
-        console.log('⚠️ DATABASE_URL не задана');
+        console.log('⚠️ DATABASE_URL не задана, используем JSON');
         return;
     }
     try {
@@ -156,7 +156,7 @@ async function saveOrder(order) {
                 [order.id, order.playerName, order.product, order.price, order.status, order.userId, order.userName, order.createdAt]
             );
             return;
-        } catch (err) {}
+        } catch (err) { console.error('DB save error:', err.message); }
     }
     const orders = readJSON(ORDERS_FILE);
     orders.push(order);
@@ -167,8 +167,13 @@ async function getOrder(orderId) {
     if (useDB && pool) {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
-            if (res.rows.length) return res.rows[0];
-        } catch (err) {}
+            if (res.rows.length) {
+                const order = res.rows[0];
+                // Нормализуем имя поля (PostgreSQL возвращает userid)
+                order.userId = order.userid;
+                return order;
+            }
+        } catch (err) { console.error('DB get error:', err.message); }
     }
     const orders = readJSON(ORDERS_FILE);
     return orders.find(o => o.id === orderId);
@@ -183,7 +188,7 @@ async function updateOrderStatus(orderId, status, userId = null) {
                 await pool.query('UPDATE orders SET status = $1 WHERE id = $2', [status, orderId]);
             }
             return;
-        } catch (err) {}
+        } catch (err) { console.error('DB update error:', err.message); }
     }
     const orders = readJSON(ORDERS_FILE);
     const order = orders.find(o => o.id === orderId);
@@ -197,8 +202,11 @@ async function getPendingOrders() {
     if (useDB && pool) {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE status = $1 ORDER BY createdAt DESC', ['awaiting_confirmation']);
-            return res.rows;
-        } catch (err) {}
+            return res.rows.map(order => {
+                order.userId = order.userid;
+                return order;
+            });
+        } catch (err) { console.error('DB get pending error:', err.message); }
     }
     const orders = readJSON(ORDERS_FILE);
     return orders.filter(o => o.status === 'awaiting_confirmation');
@@ -208,8 +216,11 @@ async function getHistoryOrders() {
     if (useDB && pool) {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE status IN ($1, $2) ORDER BY createdAt DESC', ['completed', 'cancelled']);
-            return res.rows;
-        } catch (err) {}
+            return res.rows.map(order => {
+                order.userId = order.userid;
+                return order;
+            });
+        } catch (err) { console.error('DB get history error:', err.message); }
     }
     const orders = readJSON(ORDERS_FILE);
     return orders.filter(o => o.status === 'completed' || o.status === 'cancelled');
@@ -252,11 +263,16 @@ app.post('/api/confirm-order', checkAuth, async (req, res) => {
     console.log(`🔍 Подтверждение заказа ${orderId}, userId: ${req.session.userId}`);
     
     const order = await getOrder(orderId);
-    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    if (!order) {
+        console.log(`❌ Заказ ${orderId} не найден`);
+        return res.status(404).json({ error: 'Заказ не найден' });
+    }
     
     console.log(`Заказ userId: ${order.userId}`);
+    console.log(`Заказ status: ${order.status}`);
     
     if (order.userId !== req.session.userId) {
+        console.log(`❌ Не ваш заказ: ${order.userId} !== ${req.session.userId}`);
         return res.status(403).json({ error: 'Не ваш заказ' });
     }
     if (order.status !== 'pending') {
@@ -563,7 +579,6 @@ app.get('/auth/callback', async (req, res) => {
         req.session.userRole = highestRole.name;
         req.session.userLevel = highestRole.level;
         
-        // ПРИНУДИТЕЛЬНО СОХРАНЯЕМ СЕССИЮ
         req.session.save((err) => {
             if (err) console.error('❌ Ошибка сохранения сессии:', err);
             else console.log('✅ Сессия сохранена, userId:', req.session.userId);
