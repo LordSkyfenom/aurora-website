@@ -28,20 +28,16 @@ const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID;
 const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET;
 
-// Neon Tech PostgreSQL
 const DATABASE_URL = process.env.DATABASE_URL;
 
-// Товар
 const PRODUCT = {
     name: 'Поддержка сервера 🍪',
     price: 200,
-    commands: [
-        'lp user {player} parent add sponsor'
-    ]
+    commands: ['lp user {player} parent add sponsor']
 };
 
 // ============================================
-// 💾 JSON ХРАНИЛИЩЕ (резерв)
+// 💾 ХРАНИЛИЩЕ
 // ============================================
 const DATA_DIR = path.join(__dirname, 'data');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
@@ -61,7 +57,6 @@ function writeJSON(file, data) {
     fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-// Инициализация JSON файлов
 if (!fs.existsSync(ORDERS_FILE)) writeJSON(ORDERS_FILE, []);
 if (!fs.existsSync(NEWS_FILE)) writeJSON(NEWS_FILE, []);
 if (!fs.existsSync(CITIES_FILE)) writeJSON(CITIES_FILE, []);
@@ -69,31 +64,26 @@ if (!fs.existsSync(FRIENDS_FILE)) writeJSON(FRIENDS_FILE, {});
 if (!fs.existsSync(FORUM_FILE)) writeJSON(FORUM_FILE, []);
 
 // ============================================
-// 🗄️ ПОДКЛЮЧЕНИЕ К PostgreSQL (Neon Tech)
+// 🗄️ БАЗА ДАННЫХ
 // ============================================
 let pool = null;
 let useDB = false;
 
 async function initDB() {
     if (!DATABASE_URL) {
-        console.log('⚠️ DATABASE_URL не задана, используем JSON хранилище');
+        console.log('⚠️ DATABASE_URL не задана');
         return;
     }
-    
     try {
         pool = new Pool({
             connectionString: DATABASE_URL,
             ssl: { rejectUnauthorized: false }
         });
-        
-        const client = await pool.connect();
-        await client.query('SELECT 1');
-        client.release();
-        console.log('✅ PostgreSQL подключена (Neon Tech)');
+        await pool.connect();
+        console.log('✅ PostgreSQL подключена');
         useDB = true;
     } catch (err) {
-        console.error('⚠️ Ошибка подключения к БД:', err.message);
-        console.log('⚠️ Переключаемся на JSON хранилище');
+        console.error('⚠️ Ошибка БД:', err.message);
         useDB = false;
     }
 }
@@ -105,43 +95,30 @@ let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
     bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
     console.log('🤖 Telegram бот запущен');
-    bot.on('polling_error', (err) => console.log('Polling error:', err.code));
 }
 
 // ============================================
-// 🛡️ RCON ФУНКЦИЯ
+// 🛡️ RCON
 // ============================================
 const RCON_HOST = process.env.RCON_HOST;
 const RCON_PORT = parseInt(process.env.RCON_PORT) || 25575;
 const RCON_PASSWORD = process.env.RCON_PASSWORD;
 const Rcon = require('rcon');
 
-async function sendRconCommand(playerName, command) {
-    return new Promise((resolve, reject) => {
-        const rcon = new Rcon(RCON_HOST, RCON_PORT, RCON_PASSWORD);
-        rcon.on('auth', () => {
-            rcon.send(command.replace('{player}', playerName));
-            rcon.disconnect();
-            resolve(true);
-        });
-        rcon.on('error', reject);
-        rcon.connect();
-    });
-}
-
 async function grantSponsor(playerName) {
     if (RCON_HOST && RCON_PASSWORD) {
-        try {
-            for (const cmd of PRODUCT.commands) {
-                await sendRconCommand(playerName, cmd);
-            }
-            console.log(`✅ Привилегии выданы игроку ${playerName}`);
-            return true;
-        } catch (err) {
-            console.error('❌ RCON ошибка:', err.message);
-        }
+        return new Promise((resolve) => {
+            const rcon = new Rcon(RCON_HOST, RCON_PORT, RCON_PASSWORD);
+            rcon.on('auth', () => {
+                rcon.send(`lp user ${playerName} parent add sponsor`);
+                rcon.disconnect();
+                resolve(true);
+            });
+            rcon.on('error', () => resolve(false));
+            rcon.connect();
+        });
     }
-    console.log(`⚠️ RCON не настроен, нужно выдать вручную: lp user ${playerName} parent add sponsor`);
+    console.log(`⚠️ Выдайте вручную: lp user ${playerName} parent add sponsor`);
     return false;
 }
 
@@ -155,7 +132,7 @@ app.use(session({
     secret: 'aurora-secret-key-2024',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: true, httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 24 * 7 }
+    cookie: { secure: false, httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 24 * 7 }
 }));
 
 function checkAuth(req, res, next) {
@@ -169,9 +146,8 @@ function checkOwner(req, res, next) {
 }
 
 // ============================================
-// 📦 API ЗАКАЗОВ
+// 📦 ЗАКАЗЫ
 // ============================================
-
 async function saveOrder(order) {
     if (useDB && pool) {
         try {
@@ -179,21 +155,20 @@ async function saveOrder(order) {
                 'INSERT INTO orders (id, playerName, product, price, status, userId, userName, createdAt) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
                 [order.id, order.playerName, order.product, order.price, order.status, order.userId, order.userName, order.createdAt]
             );
-            return true;
-        } catch (err) { console.error('DB save error:', err.message); }
+            return;
+        } catch (err) {}
     }
     const orders = readJSON(ORDERS_FILE);
     orders.push(order);
     writeJSON(ORDERS_FILE, orders);
-    return true;
 }
 
 async function getOrder(orderId) {
     if (useDB && pool) {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
-            if (res.rows.length > 0) return res.rows[0];
-        } catch (err) { console.error('DB get error:', err.message); }
+            if (res.rows.length) return res.rows[0];
+        } catch (err) {}
     }
     const orders = readJSON(ORDERS_FILE);
     return orders.find(o => o.id === orderId);
@@ -207,8 +182,8 @@ async function updateOrderStatus(orderId, status, userId = null) {
             } else {
                 await pool.query('UPDATE orders SET status = $1 WHERE id = $2', [status, orderId]);
             }
-            return true;
-        } catch (err) { console.error('DB update error:', err.message); }
+            return;
+        } catch (err) {}
     }
     const orders = readJSON(ORDERS_FILE);
     const order = orders.find(o => o.id === orderId);
@@ -216,7 +191,6 @@ async function updateOrderStatus(orderId, status, userId = null) {
         order.status = status;
         writeJSON(ORDERS_FILE, orders);
     }
-    return true;
 }
 
 async function getPendingOrders() {
@@ -224,7 +198,7 @@ async function getPendingOrders() {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE status = $1 ORDER BY createdAt DESC', ['awaiting_confirmation']);
             return res.rows;
-        } catch (err) { console.error('DB get pending error:', err.message); }
+        } catch (err) {}
     }
     const orders = readJSON(ORDERS_FILE);
     return orders.filter(o => o.status === 'awaiting_confirmation');
@@ -235,34 +209,17 @@ async function getHistoryOrders() {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE status IN ($1, $2) ORDER BY createdAt DESC', ['completed', 'cancelled']);
             return res.rows;
-        } catch (err) { console.error('DB get history error:', err.message); }
+        } catch (err) {}
     }
     const orders = readJSON(ORDERS_FILE);
     return orders.filter(o => o.status === 'completed' || o.status === 'cancelled');
 }
 
-async function completeOrder(orderId, playerName) {
-    if (useDB && pool) {
-        try {
-            await grantSponsor(playerName);
-            await pool.query('UPDATE orders SET status = $1, completedAt = $2 WHERE id = $3', ['completed', new Date().toISOString(), orderId]);
-            return true;
-        } catch (err) { console.error('DB complete error:', err.message); }
-    }
-    const orders = readJSON(ORDERS_FILE);
-    const order = orders.find(o => o.id === orderId);
-    if (order && order.status === 'awaiting_confirmation') {
-        await grantSponsor(playerName);
-        order.status = 'completed';
-        order.completedAt = new Date().toISOString();
-        writeJSON(ORDERS_FILE, orders);
-    }
-    return true;
-}
-
 app.post('/api/create-order', checkAuth, async (req, res) => {
     const { playerName } = req.body;
     if (!playerName) return res.status(400).json({ error: 'Укажите ник' });
+    
+    console.log(`📝 Создание заказа, userId: ${req.session.userId}`);
     
     const orderId = Date.now().toString();
     const newOrder = {
@@ -289,53 +246,24 @@ app.get('/api/order/:id', async (req, res) => {
     res.json(order);
 });
 
-// ============================================
-// 🔍 ОТЛАДОЧНЫЙ МАРШРУТ
-// ============================================
-app.get('/api/debug-session', (req, res) => {
-    res.json({
-        userId: req.session.userId,
-        username: req.session.username,
-        role: req.session.userRole,
-        level: req.session.userLevel,
-        hasSession: !!req.session.userId
-    });
-});
-
-// ============================================
-// 🔍 ИСПРАВЛЕННЫЙ confirm-order С ОТЛАДКОЙ
-// ============================================
 app.post('/api/confirm-order', checkAuth, async (req, res) => {
     const { orderId } = req.body;
     
-    console.log(`🔍 Проверка заказа ${orderId}`);
-    console.log(`Текущий userId: ${req.session.userId}`);
-    console.log(`Текущий username: ${req.session.username}`);
+    console.log(`🔍 Подтверждение заказа ${orderId}, userId: ${req.session.userId}`);
     
     const order = await getOrder(orderId);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
     
-    if (!order) {
-        console.log(`❌ Заказ ${orderId} не найден`);
-        return res.status(404).json({ error: 'Заказ не найден' });
-    }
-    
-    console.log(`Заказ найден:`);
-    console.log(`  - userId: ${order.userId}`);
-    console.log(`  - playerName: ${order.playername || order.playerName}`);
-    console.log(`  - status: ${order.status}`);
+    console.log(`Заказ userId: ${order.userId}`);
     
     if (order.userId !== req.session.userId) {
-        console.log(`❌ userId не совпадает: ${order.userId} !== ${req.session.userId}`);
         return res.status(403).json({ error: 'Не ваш заказ' });
     }
     if (order.status !== 'pending') {
-        console.log(`❌ Заказ уже обработан, статус: ${order.status}`);
         return res.status(400).json({ error: 'Заказ уже обработан' });
     }
     
     await updateOrderStatus(orderId, 'awaiting_confirmation');
-    
-    console.log(`✅ Заказ ${orderId} подтверждён, статус обновлён`);
     
     if (bot && ADMIN_CHAT_ID) {
         bot.sendMessage(ADMIN_CHAT_ID, `🆕 Новая покупка!\n👤 Игрок: ${order.playerName}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}`);
@@ -351,9 +279,8 @@ app.post('/api/cancel-order', checkAuth, async (req, res) => {
 });
 
 // ============================================
-// 👑 АДМИН ПАНЕЛЬ API
+// 👑 АДМИН ПАНЕЛЬ
 // ============================================
-
 app.get('/api/admin/orders', checkAuth, checkOwner, async (req, res) => {
     const orders = await getPendingOrders();
     res.json(orders);
@@ -368,15 +295,14 @@ app.post('/api/admin/grant', checkAuth, checkOwner, async (req, res) => {
     const { orderId } = req.body;
     const orders = await getPendingOrders();
     const order = orders.find(o => o.id === orderId);
-    
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
     
-    await completeOrder(orderId, order.playerName);
+    await grantSponsor(order.playerName);
+    await updateOrderStatus(orderId, 'completed');
     
     if (bot && ADMIN_CHAT_ID) {
-        bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы игроку ${order.playerName} (заказ #${orderId})`);
+        bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы ${order.playerName} (заказ #${orderId})`);
     }
-    
     res.json({ success: true });
 });
 
@@ -387,14 +313,9 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 });
 
 // ============================================
-// 📰 API НОВОСТИ (JSON пока)
+// 📰 НОВОСТИ (JSON)
 // ============================================
-
-app.get('/api/news', (req, res) => {
-    const news = readJSON(NEWS_FILE);
-    res.json(news);
-});
-
+app.get('/api/news', (req, res) => res.json(readJSON(NEWS_FILE)));
 app.post('/api/news', checkAuth, (req, res) => {
     const { title, content } = req.body;
     const news = readJSON(NEWS_FILE);
@@ -402,7 +323,6 @@ app.post('/api/news', checkAuth, (req, res) => {
     writeJSON(NEWS_FILE, news);
     res.json({ success: true });
 });
-
 app.delete('/api/news/:id', checkAuth, (req, res) => {
     let news = readJSON(NEWS_FILE);
     news = news.filter(n => n.id != req.params.id);
@@ -411,14 +331,9 @@ app.delete('/api/news/:id', checkAuth, (req, res) => {
 });
 
 // ============================================
-// 🏙️ API ГОРОДА (JSON пока)
+// 🏙️ ГОРОДА (JSON)
 // ============================================
-
-app.get('/api/cities', (req, res) => {
-    const cities = readJSON(CITIES_FILE);
-    res.json(cities);
-});
-
+app.get('/api/cities', (req, res) => res.json(readJSON(CITIES_FILE)));
 app.post('/api/cities', checkAuth, (req, res) => {
     const { name, description } = req.body;
     const cities = readJSON(CITIES_FILE);
@@ -426,7 +341,6 @@ app.post('/api/cities', checkAuth, (req, res) => {
     writeJSON(CITIES_FILE, cities);
     res.json({ success: true });
 });
-
 app.delete('/api/cities/:id', checkAuth, (req, res) => {
     let cities = readJSON(CITIES_FILE);
     cities = cities.filter(c => c.id != req.params.id || c.ownerId !== req.session.userId);
@@ -435,14 +349,12 @@ app.delete('/api/cities/:id', checkAuth, (req, res) => {
 });
 
 // ============================================
-// 👥 API ДРУЗЬЯ (JSON пока)
+// 👥 ДРУЗЬЯ (JSON)
 // ============================================
-
 app.get('/api/friends/data', checkAuth, (req, res) => {
     const data = readJSON(FRIENDS_FILE);
     res.json(data[req.session.userId] || { friends: [], messages: [] });
 });
-
 app.post('/api/friends/add', checkAuth, (req, res) => {
     const { friendId } = req.body;
     const data = readJSON(FRIENDS_FILE);
@@ -455,7 +367,6 @@ app.post('/api/friends/add', checkAuth, (req, res) => {
     }
     res.json({ success: true });
 });
-
 app.post('/api/friends/message', checkAuth, (req, res) => {
     const { toId, message } = req.body;
     const data = readJSON(FRIENDS_FILE);
@@ -471,14 +382,9 @@ app.post('/api/friends/message', checkAuth, (req, res) => {
 });
 
 // ============================================
-// 📝 API ФОРУМ (JSON пока)
+// 📝 ФОРУМ (JSON)
 // ============================================
-
-app.get('/api/forum', (req, res) => {
-    const forum = readJSON(FORUM_FILE);
-    res.json(forum);
-});
-
+app.get('/api/forum', (req, res) => res.json(readJSON(FORUM_FILE)));
 app.post('/api/forum', checkAuth, (req, res) => {
     const { title, content } = req.body;
     const forum = readJSON(FORUM_FILE);
@@ -486,7 +392,6 @@ app.post('/api/forum', checkAuth, (req, res) => {
     writeJSON(FORUM_FILE, forum);
     res.json({ success: true });
 });
-
 app.post('/api/forum/:id/answer', checkAuth, (req, res) => {
     const { content } = req.body;
     const forum = readJSON(FORUM_FILE);
@@ -507,19 +412,14 @@ app.get('/news', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'vie
 app.get('/cities', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'cities.html')));
 app.get('/friends', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'friends.html')));
 app.get('/forum', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'forum.html')));
-
 app.get('/admin', (req, res) => {
-    if (!req.session.userId) {
-        return res.send(`<!DOCTYPE html><html><head><title>Доступ запрещён</title><style>body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}.error-box{text-align:center;background:#20232b;padding:40px;border-radius:24px;border:1px solid #ff4444}.back-link{color:#2ecc2e;text-decoration:none}</style></head><body><div class="error-box"><h1>🔒 Доступ запрещён</h1><p>Войдите через Discord.</p><a href="/" class="back-link">← На главную</a></div></body></html>`);
-    }
-    if (req.session.userId !== OWNER_DISCORD_ID) {
-        return res.status(403).send(`<!DOCTYPE html><html><head><title>Доступ запрещён</title><style>body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}.error-box{text-align:center;background:#20232b;padding:40px;border-radius:24px;border:1px solid #ff4444}.back-link{color:#2ecc2e;text-decoration:none}</style></head><body><div class="error-box"><h1>⛔ Нет прав</h1><p>У вас нет доступа.</p><a href="/" class="back-link">← На главную</a></div></body></html>`);
-    }
+    if (!req.session.userId) return res.send('<h1>Войдите через Discord</h1><a href="/">На главную</a>');
+    if (req.session.userId !== OWNER_DISCORD_ID) return res.status(403).send('<h1>Нет прав</h1>');
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
 // ============================================
-// 📊 API СТАТУС СЕРВЕРА
+// 📊 СТАТУСЫ
 // ============================================
 app.get('/api/server-status', async (req, res) => {
     try {
@@ -533,30 +433,22 @@ app.get('/api/server-status', async (req, res) => {
 
 app.get('/api/user', (req, res) => {
     if (req.session.userId) {
-        res.json({
-            authenticated: true,
-            id: req.session.userId,
-            username: req.session.username,
-            role: req.session.userRole,
-            level: req.session.userLevel
-        });
+        res.json({ authenticated: true, id: req.session.userId, username: req.session.username, role: req.session.userRole, level: req.session.userLevel });
     } else {
         res.json({ authenticated: false });
     }
 });
 
-// ============================================
-// 🧪 ТЕСТОВЫЙ МАРШРУТ ДЛЯ ПРОВЕРКИ БД
-// ============================================
+app.get('/api/debug-session', (req, res) => {
+    res.json({ userId: req.session.userId, username: req.session.username });
+});
+
 app.get('/api/db-status', (req, res) => {
-    res.json({ 
-        useDB: useDB,
-        message: useDB ? 'PostgreSQL подключена (Neon)' : 'Используется JSON (резерв)'
-    });
+    res.json({ useDB, message: useDB ? 'PostgreSQL подключена' : 'JSON резерв' });
 });
 
 // ============================================
-// 🔐 DISCORD OAuth2
+// 🔐 DISCORD OAUTH
 // ============================================
 const agent = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
 
@@ -566,7 +458,10 @@ async function fetchWithRetry(url, options, retries = 3) {
             const response = await fetch(url, { ...options, agent });
             if (response.ok) return response;
             throw new Error(`HTTP ${response.status}`);
-        } catch (error) { if (i === retries - 1) throw error; await new Promise(r => setTimeout(r, 2000)); }
+        } catch (error) {
+            if (i === retries - 1) throw error;
+            await new Promise(r => setTimeout(r, 2000));
+        }
     }
 }
 
@@ -575,9 +470,6 @@ app.get('/auth/discord', (req, res) => {
     res.redirect(url);
 });
 
-// ============================================
-// РОЛИ
-// ============================================
 const ROLE_PRIORITY = [
     'SUPREME ADMINISTRATION', 'ADMINISTRATION', 'MODERATION', 'HEAD OF DISCORD',
     'HEAD OF MEDIA', 'COMPOSITION MONITOR', 'COMPOSITION OF AURORA', 'MEDIA',
@@ -620,7 +512,9 @@ const ROLE_LEVEL = {
 function getHighestRoleById(userRoleIds) {
     for (const roleName of ROLE_PRIORITY) {
         const roleId = ROLE_IDS[roleName];
-        if (roleId && userRoleIds.includes(roleId)) return { name: roleName, displayName: ROLE_DISPLAY[roleName], level: ROLE_LEVEL[roleName] };
+        if (roleId && userRoleIds.includes(roleId)) {
+            return { name: roleName, displayName: ROLE_DISPLAY[roleName], level: ROLE_LEVEL[roleName] };
+        }
     }
     return { name: 'beginner', displayName: '🌱 Beginner', level: '🌱 Новичок' };
 }
@@ -636,16 +530,16 @@ app.get('/auth/callback', async (req, res) => {
         tokenParams.append('code', code);
         tokenParams.append('redirect_uri', REDIRECT_URI);
         
-        const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 
-            body: tokenParams 
+        const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: tokenParams
         });
         const tokenData = await tokenRes.json();
         const accessToken = tokenData.access_token;
         
-        const userRes = await fetchWithRetry('https://discord.com/api/users/@me', { 
-            headers: { Authorization: `Bearer ${accessToken}` } 
+        const userRes = await fetchWithRetry('https://discord.com/api/users/@me', {
+            headers: { Authorization: `Bearer ${accessToken}` }
         });
         const userData = await userRes.json();
         
@@ -656,31 +550,62 @@ app.get('/auth/callback', async (req, res) => {
             });
             const memberData = await memberRes.json();
             userRoleIds = memberData.roles || [];
-            console.log('📋 ID ролей пользователя:', userRoleIds);
+            console.log('📋 ID ролей:', userRoleIds);
         } catch (err) {
-            console.log('⚠️ Не удалось получить роли:', err.message);
+            console.log('⚠️ Ошибка получения ролей:', err.message);
         }
         
         const highestRole = getHighestRoleById(userRoleIds);
-        console.log(`🏆 Самая высокая роль: ${highestRole.displayName}`);
+        console.log(`🏆 Роль: ${highestRole.displayName}`);
         
         req.session.userId = userData.id;
         req.session.username = userData.username;
         req.session.userRole = highestRole.name;
         req.session.userLevel = highestRole.level;
         
-        const result = { 
-            id: userData.id, 
-            username: userData.username, 
-            avatar: userData.avatar, 
-            displayRole: highestRole.displayName, 
-            level: highestRole.level 
+        // ПРИНУДИТЕЛЬНО СОХРАНЯЕМ СЕССИЮ
+        req.session.save((err) => {
+            if (err) console.error('❌ Ошибка сохранения сессии:', err);
+            else console.log('✅ Сессия сохранена, userId:', req.session.userId);
+        });
+        
+        const result = {
+            id: userData.id,
+            username: userData.username,
+            avatar: userData.avatar,
+            displayRole: highestRole.displayName,
+            level: highestRole.level
         };
         
-        res.send(`<!DOCTYPE html><html><head><title>Авторизация Aurora</title><style>body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}.success-box{text-align:center;background:#20232b;padding:40px;border-radius:24px;border:1px solid #2ecc2e}.spinner{width:40px;height:40px;border:3px solid #2ecc2e;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;margin:20px auto}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="success-box"><div class="spinner"></div><div style="color:#2ecc2e;font-size:24px;">✅ Вход выполнен!</div><p>👤 ${userData.username}</p><p>🏷️ Роль: ${highestRole.displayName}</p><p>📊 Уровень: ${highestRole.level}</p><p>🔄 Перенаправление...</p></div><script>localStorage.setItem('aurora_user','${JSON.stringify(result).replace(/'/g, "\\'")}');setTimeout(()=>{window.location.href='/'},1500);</script></body></html>`);
-    } catch (error) { 
+        res.send(`<!DOCTYPE html>
+        <html>
+        <head>
+            <title>Авторизация Aurora</title>
+            <style>
+                body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}
+                .success-box{text-align:center;background:#20232b;padding:40px;border-radius:24px;border:1px solid #2ecc2e}
+                .spinner{width:40px;height:40px;border:3px solid #2ecc2e;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;margin:20px auto}
+                @keyframes spin{to{transform:rotate(360deg)}}
+            </style>
+        </head>
+        <body>
+            <div class="success-box">
+                <div class="spinner"></div>
+                <div style="color:#2ecc2e;font-size:24px;">✅ Вход выполнен!</div>
+                <p>👤 ${userData.username}</p>
+                <p>🏷️ Роль: ${highestRole.displayName}</p>
+                <p>📊 Уровень: ${highestRole.level}</p>
+                <p>🔄 Перенаправление...</p>
+            </div>
+            <script>
+                localStorage.setItem('aurora_user', '${JSON.stringify(result).replace(/'/g, "\\'")}');
+                setTimeout(() => { window.location.href = '/'; }, 1500);
+            </script>
+        </body>
+        </html>`);
+    } catch (error) {
         console.error('Ошибка авторизации:', error);
-        res.status(500).send('Ошибка авторизации'); 
+        res.status(500).send('Ошибка авторизации');
     }
 });
 
@@ -693,14 +618,9 @@ async function start() {
     await initDB();
     app.listen(PORT, () => {
         console.log('='.repeat(50));
-        console.log('🚀 Aurora Server запущен!');
+        console.log('🚀 Сервер запущен');
         console.log(`📍 http://localhost:${PORT}`);
         console.log('='.repeat(50));
-        console.log(`👑 Владелец ID: ${OWNER_DISCORD_ID || '❌'}`);
-        console.log(`🤖 Telegram: ${TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
-        console.log(`💳 ЮMoney: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
-        console.log(`🗄️ Режим: ${useDB ? 'PostgreSQL (Neon)' : 'JSON (резерв)'}`);
-        console.log(`🤖 Discord бот: ${BOT_TOKEN ? '✅' : '❌'}`);
     });
 }
 
