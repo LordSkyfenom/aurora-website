@@ -9,6 +9,7 @@ const https = require('https');
 const session = require('express-session');
 const fs = require('fs');
 const { Pool } = require('pg');
+const pgSession = require('connect-pg-simple')(session);
 
 const TelegramBot = require('node-telegram-bot-api');
 
@@ -37,7 +38,7 @@ const PRODUCT = {
 };
 
 // ============================================
-// 💾 JSON ХРАНИЛИЩЕ (только для резерва)
+// 💾 JSON ХРАНИЛИЩЕ (только для резерва заказов)
 // ============================================
 const DATA_DIR = path.join(__dirname, 'data');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
@@ -125,11 +126,23 @@ async function grantSponsor(playerName) {
 app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.static(__dirname));
+
+// Настройка сессий с PostgreSQL
 app.use(session({
+    store: new pgSession({
+        pool: pool,
+        tableName: 'session',
+        createTableIfMissing: false
+    }),
     secret: 'aurora-secret-key-2024',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 24 * 7 }
+    cookie: { 
+        secure: false,
+        httpOnly: true, 
+        sameSite: 'lax', 
+        maxAge: 1000 * 60 * 60 * 24 * 7
+    }
 }));
 
 function checkAuth(req, res, next) {
