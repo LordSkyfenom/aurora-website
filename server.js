@@ -632,7 +632,7 @@ app.get('/api/db-status', (req, res) => {
 });
 
 // ============================================
-// 🔐 DISCORD OAuth2
+// 🔐 DISCORD OAuth2 (с получением ролей)
 // ============================================
 const agent = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
 
@@ -651,6 +651,9 @@ app.get('/auth/discord', (req, res) => {
     res.redirect(url);
 });
 
+// ============================================
+// РОЛИ (ID и отображение)
+// ============================================
 const ROLE_PRIORITY = [
     'SUPREME ADMINISTRATION', 'ADMINISTRATION', 'MODERATION', 'HEAD OF DISCORD',
     'HEAD OF MEDIA', 'COMPOSITION MONITOR', 'COMPOSITION OF AURORA', 'MEDIA',
@@ -708,25 +711,54 @@ app.get('/auth/callback', async (req, res) => {
         tokenParams.append('grant_type', 'authorization_code');
         tokenParams.append('code', code);
         tokenParams.append('redirect_uri', REDIRECT_URI);
-        const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: tokenParams });
+        
+        const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 
+            body: tokenParams 
+        });
         const tokenData = await tokenRes.json();
         const accessToken = tokenData.access_token;
-        const userRes = await fetchWithRetry('https://discord.com/api/users/@me', { headers: { Authorization: `Bearer ${accessToken}` } });
+        
+        const userRes = await fetchWithRetry('https://discord.com/api/users/@me', { 
+            headers: { Authorization: `Bearer ${accessToken}` } 
+        });
         const userData = await userRes.json();
+        
+        // ========== ПОЛУЧАЕМ РОЛИ ПОЛЬЗОВАТЕЛЯ ==========
         let userRoleIds = [];
         try {
-            const memberRes = await fetchWithRetry(`https://discord.com/api/guilds/${YOUR_GUILD_ID}/members/${userData.id}`, { headers: { Authorization: `Bot ${BOT_TOKEN}` } });
+            const memberRes = await fetchWithRetry(`https://discord.com/api/guilds/${YOUR_GUILD_ID}/members/${userData.id}`, {
+                headers: { Authorization: `Bot ${BOT_TOKEN}` }
+            });
             const memberData = await memberRes.json();
             userRoleIds = memberData.roles || [];
-        } catch (err) {}
+            console.log('📋 ID ролей пользователя:', userRoleIds);
+        } catch (err) {
+            console.log('⚠️ Не удалось получить роли:', err.message);
+        }
+        
         const highestRole = getHighestRoleById(userRoleIds);
+        console.log(`🏆 Самая высокая роль: ${highestRole.displayName}`);
+        
         req.session.userId = userData.id;
         req.session.username = userData.username;
         req.session.userRole = highestRole.name;
         req.session.userLevel = highestRole.level;
-        const result = { id: userData.id, username: userData.username, avatar: userData.avatar, displayRole: highestRole.displayName, level: highestRole.level };
+        
+        const result = { 
+            id: userData.id, 
+            username: userData.username, 
+            avatar: userData.avatar, 
+            displayRole: highestRole.displayName, 
+            level: highestRole.level 
+        };
+        
         res.send(`<!DOCTYPE html><html><head><title>Авторизация Aurora</title><style>body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}.success-box{text-align:center;background:#20232b;padding:40px;border-radius:24px;border:1px solid #2ecc2e}.spinner{width:40px;height:40px;border:3px solid #2ecc2e;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;margin:20px auto}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="success-box"><div class="spinner"></div><div style="color:#2ecc2e;font-size:24px;">✅ Вход выполнен!</div><p>👤 ${userData.username}</p><p>🏷️ Роль: ${highestRole.displayName}</p><p>📊 Уровень: ${highestRole.level}</p><p>🔄 Перенаправление...</p></div><script>localStorage.setItem('aurora_user','${JSON.stringify(result).replace(/'/g, "\\'")}');setTimeout(()=>{window.location.href='/'},1500);</script></body></html>`);
-    } catch (error) { res.status(500).send('Ошибка авторизации'); }
+    } catch (error) { 
+        console.error('Ошибка авторизации:', error);
+        res.status(500).send('Ошибка авторизации'); 
+    }
 });
 
 // ============================================
@@ -745,6 +777,7 @@ async function start() {
         console.log(`🤖 Telegram: ${TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
         console.log(`💳 ЮMoney: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
         console.log(`🗄️ Режим: ${useDB ? 'PostgreSQL (Neon)' : 'JSON (резерв)'}`);
+        console.log(`🤖 Discord бот: ${BOT_TOKEN ? '✅' : '❌'}`);
     });
 }
 
