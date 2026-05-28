@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Статус заказа - Aurora</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .status-container { max-width: 500px; margin: 0 auto; padding: 60px 20px; text-align: center; }
+        .order-card { background: #20232b; border-radius: 24px; padding: 32px; border: 1px solid #2ecc2e; }
+        .order-id { color: #2ecc2e; font-size: 1.2rem; margin-bottom: 20px; }
+        .button-group { display: flex; gap: 16px; margin-top: 30px; justify-content: center; }
+        .btn-confirm { background: #2ecc2e; color: #1a1d24; border: none; padding: 12px 32px; border-radius: 40px; cursor: pointer; font-weight: bold; }
+        .btn-cancel { background: #dc2626; color: white; border: none; padding: 12px 32px; border-radius: 40px; cursor: pointer; font-weight: bold; }
+        .btn-back { background: #3d434d; color: white; border: none; padding: 12px 32px; border-radius: 40px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .info-text { color: #919ba8; margin: 20px 0; }
+        .warning { color: #fbbf24; margin: 15px 0; }
+    </style>
+</head>
+<body>
+    <div class="status-container">
+        <div class="order-card">
+            <h1 style="color:#2ecc2e;">💰 Статус заказа</h1>
+            <div id="orderInfo">
+                <p>Загрузка...</p>
+            </div>
+            <div id="buttons" class="button-group"></div>
+            <a href="/" class="btn-back">← На главную</a>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const orderId = urlParams.get('orderId');
+        
+        if (!orderId) {
+            document.getElementById('orderInfo').innerHTML = '<p>❌ Заказ не указан</p>';
+        } else {
+            loadOrder();
+        }
+        
+        async function loadOrder() {
+            const res = await fetch(`/api/order/${orderId}`);
+            const order = await res.json();
+            
+            if (!order || order.error) {
+                document.getElementById('orderInfo').innerHTML = `<p>❌ ${order.error || 'Заказ не найден'}</p>`;
+                return;
+            }
+            
+            document.getElementById('orderInfo').innerHTML = `
+                <div class="order-id">📦 Заказ #${order.id}</div>
+                <p>👤 Игрок: <strong>${order.playerName}</strong></p>
+                <p>📦 Товар: ${order.product}</p>
+                <p>💰 Сумма: ${order.price}₽</p>
+                <p>📌 Статус: ${order.status === 'pending' ? '⏳ Ожидает оплаты' : order.status}</p>
+                <div class="warning">⚠️ После оплаты нажмите "Подтвердить"</div>
+            `;
+            
+            const buttonsDiv = document.getElementById('buttons');
+            if (order.status === 'pending') {
+                buttonsDiv.innerHTML = `
+                    <button class="btn-confirm" onclick="confirmOrder()">✅ Я оплатил</button>
+                    <button class="btn-cancel" onclick="cancelOrder()">❌ Отменить заказ</button>
+                `;
+            } else if (order.status === 'awaiting_confirmation') {
+                buttonsDiv.innerHTML = `<p style="color:#2ecc2e;">✅ Заказ подтверждён, ожидает выдачи администратором</p>`;
+            } else if (order.status === 'completed') {
+                buttonsDiv.innerHTML = `<p style="color:#2ecc2e;">✅ Заказ выполнен! Привилегии выданы.</p>`;
+            } else if (order.status === 'cancelled') {
+                buttonsDiv.innerHTML = `<p style="color:#dc2626;">❌ Заказ отменён</p>`;
+            }
+        }
+        
+        async function confirmOrder() {
+            if (!confirm('Подтверждаете оплату? После этого заказ отправится на проверку администратору.')) return;
+            
+            const res = await fetch('/api/confirm-order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId })
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                alert('✅ Заказ подтверждён! Администратор проверит оплату и выдаст привилегию.');
+                loadOrder();
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        }
+        
+        async function cancelOrder() {
+            if (!confirm('Отменить заказ?')) return;
+            
+            const res = await fetch('/api/cancel-order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orderId })
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                alert('✅ Заказ отменён');
+                loadOrder();
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        }
+    </script>
+</body>
+</html>
