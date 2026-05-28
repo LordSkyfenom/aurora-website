@@ -41,27 +41,46 @@ const PRODUCT = {
 };
 
 // ============================================
-// 🗄️ БАЗА ДАННЫХ (Neon)
+// 🗄️ БАЗА ДАННЫХ (Neon) с ожиданием подключения
 // ============================================
 let pool = null;
 let useDB = false;
+let dbReady = false;
+let dbReadyResolvers = [];
+
+function waitForDB() {
+    if (dbReady) return Promise.resolve();
+    return new Promise(resolve => dbReadyResolvers.push(resolve));
+}
 
 async function initDB() {
     if (!DATABASE_URL) {
         console.log('⚠️ DATABASE_URL не задана');
+        dbReady = true;
+        dbReadyResolvers.forEach(r => r());
         return;
     }
     try {
         pool = new Pool({
             connectionString: DATABASE_URL,
-            ssl: { rejectUnauthorized: false }
+            ssl: { rejectUnauthorized: false },
+            max: 5,
+            idleTimeoutMillis: 30000,
+            connectionTimeoutMillis: 10000
         });
-        await pool.connect();
+        
+        // Проверяем подключение
+        const client = await pool.connect();
+        await client.query('SELECT 1');
+        client.release();
         console.log('✅ PostgreSQL подключена');
         useDB = true;
     } catch (err) {
         console.error('❌ Ошибка БД:', err.message);
         useDB = false;
+    } finally {
+        dbReady = true;
+        dbReadyResolvers.forEach(r => r());
     }
 }
 
@@ -137,6 +156,7 @@ function checkOwner(req, res, next) {
 // 📦 ЗАКАЗЫ (PostgreSQL)
 // ============================================
 async function saveOrder(order) {
+    await waitForDB();
     if (useDB && pool) {
         try {
             await pool.query(
@@ -149,6 +169,7 @@ async function saveOrder(order) {
 }
 
 async function getOrder(orderId) {
+    await waitForDB();
     if (useDB && pool) {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
@@ -163,6 +184,7 @@ async function getOrder(orderId) {
 }
 
 async function updateOrderStatus(orderId, status, userId = null) {
+    await waitForDB();
     if (useDB && pool) {
         try {
             if (userId) {
@@ -176,6 +198,7 @@ async function updateOrderStatus(orderId, status, userId = null) {
 }
 
 async function getPendingOrders() {
+    await waitForDB();
     if (useDB && pool) {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE status = $1 ORDER BY createdAt DESC', ['awaiting_confirmation']);
@@ -189,6 +212,7 @@ async function getPendingOrders() {
 }
 
 async function getHistoryOrders() {
+    await waitForDB();
     if (useDB && pool) {
         try {
             const res = await pool.query('SELECT * FROM orders WHERE status IN ($1, $2) ORDER BY createdAt DESC', ['completed', 'cancelled']);
@@ -290,6 +314,7 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 // 📰 НОВОСТИ (PostgreSQL)
 // ============================================
 app.get('/api/news', async (req, res) => {
+    await waitForDB();
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT * FROM news ORDER BY createdAt DESC');
@@ -304,6 +329,7 @@ app.post('/api/news', checkAuth, async (req, res) => {
     const id = Date.now().toString();
     const createdAt = new Date().toISOString();
     
+    await waitForDB();
     if (useDB && pool) {
         try {
             await pool.query(
@@ -317,6 +343,7 @@ app.post('/api/news', checkAuth, async (req, res) => {
 });
 
 app.delete('/api/news/:id', checkAuth, async (req, res) => {
+    await waitForDB();
     if (useDB && pool) {
         try {
             await pool.query('DELETE FROM news WHERE id = $1', [req.params.id]);
@@ -330,6 +357,7 @@ app.delete('/api/news/:id', checkAuth, async (req, res) => {
 // 🏙️ ГОРОДА (PostgreSQL)
 // ============================================
 app.get('/api/cities', async (req, res) => {
+    await waitForDB();
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT * FROM cities ORDER BY createdAt DESC');
@@ -352,6 +380,7 @@ app.post('/api/cities', checkAuth, async (req, res) => {
     const id = Date.now().toString();
     const createdAt = new Date().toISOString();
     
+    await waitForDB();
     if (useDB && pool) {
         try {
             await pool.query(
@@ -365,6 +394,7 @@ app.post('/api/cities', checkAuth, async (req, res) => {
 });
 
 app.delete('/api/cities/:id', checkAuth, async (req, res) => {
+    await waitForDB();
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT ownerid, ownerId FROM cities WHERE id = $1', [req.params.id]);
@@ -389,6 +419,7 @@ app.delete('/api/cities/:id', checkAuth, async (req, res) => {
 // 👥 ДРУЗЬЯ (PostgreSQL)
 // ============================================
 app.get('/api/friends/data', checkAuth, async (req, res) => {
+    await waitForDB();
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
@@ -401,6 +432,7 @@ app.get('/api/friends/data', checkAuth, async (req, res) => {
 
 app.post('/api/friends/add', checkAuth, async (req, res) => {
     const { friendId } = req.body;
+    await waitForDB();
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
@@ -422,6 +454,7 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
     const { toId, message } = req.body;
     const msg = { id: Date.now(), from: req.session.userId, fromName: req.session.username, to: toId, message, timestamp: new Date().toISOString() };
     
+    await waitForDB();
     if (useDB && pool) {
         try {
             let result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
@@ -445,6 +478,7 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
 // 📝 ФОРУМ (PostgreSQL)
 // ============================================
 app.get('/api/forum', async (req, res) => {
+    await waitForDB();
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT * FROM forum ORDER BY createdAt DESC');
@@ -459,6 +493,7 @@ app.post('/api/forum', checkAuth, async (req, res) => {
     const id = Date.now().toString();
     const createdAt = new Date().toISOString();
     
+    await waitForDB();
     if (useDB && pool) {
         try {
             await pool.query(
@@ -475,6 +510,7 @@ app.post('/api/forum/:id/answer', checkAuth, async (req, res) => {
     const { content } = req.body;
     const answer = { id: Date.now(), authorId: req.session.userId, authorName: req.session.username, content, createdAt: new Date().toISOString() };
     
+    await waitForDB();
     if (useDB && pool) {
         try {
             const result = await pool.query('SELECT answers FROM forum WHERE id = $1', [req.params.id]);
@@ -508,13 +544,12 @@ app.get('/admin', (req, res) => {
 // ============================================
 app.get('/api/server-status', async (req, res) => {
     try {
-        // Используем mcapi.us (работает через ping)
-        const response = await fetch(`https://mcapi.us/server/status?ip=${SERVER_IP}&port=${SERVER_PORT}`);
+        const response = await fetch(`https://api.mcsrvstat.us/2/${SERVER_IP}:${SERVER_PORT}?${Date.now()}`);
         const data = await response.json();
         res.json({
             online: data.online || false,
             players: { 
-                online: data.players?.now || 0, 
+                online: data.players?.online || 0, 
                 max: data.players?.max || 99 
             }
         });
@@ -707,7 +742,12 @@ app.get('/auth/callback', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 
 async function start() {
-    await initDB();
+    // Инициализируем БД без блокировки запуска
+    initDB().then(() => {
+        console.log('Инициализация БД завершена');
+    }).catch(err => {
+        console.error('Ошибка инициализации БД:', err);
+    });
     
     if (bot && TELEGRAM_BOT_TOKEN) {
         const webhookUrl = `https://aurora-mc.onrender.com/webhook/telegram`;
