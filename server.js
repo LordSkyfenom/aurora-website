@@ -291,6 +291,7 @@ app.get('/api/order/:id', async (req, res) => {
 
 app.post('/api/confirm-order', checkAuth, async (req, res) => {
     const { orderId } = req.body;
+    
     const order = await getOrder(orderId);
     
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
@@ -300,7 +301,7 @@ app.post('/api/confirm-order', checkAuth, async (req, res) => {
     await updateOrderStatus(orderId, 'awaiting_confirmation');
     
     if (bot && ADMIN_CHAT_ID) {
-        bot.sendMessage(ADMIN_CHAT_ID, `🆕 Новая покупка!\n👤 Игрок: ${order.playername || order.playerName}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}`);
+        bot.sendMessage(ADMIN_CHAT_ID, `🆕 Новая покупка!\n👤 Игрок: ${order.playerName}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}`);
     }
     
     res.json({ success: true });
@@ -333,10 +334,10 @@ app.post('/api/admin/grant', checkAuth, checkOwner, async (req, res) => {
     
     if (!order) return res.status(404).json({ error: 'Заказ не найден' });
     
-    await completeOrder(orderId, order.playername || order.playerName);
+    await completeOrder(orderId, order.playerName);
     
     if (bot && ADMIN_CHAT_ID) {
-        bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы игроку ${order.playername || order.playerName} (заказ #${orderId})`);
+        bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы игроку ${order.playerName} (заказ #${orderId})`);
     }
     
     res.json({ success: true });
