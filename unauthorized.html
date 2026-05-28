@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Доступ запрещён - Aurora</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1d24;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #e2e4e8;
+        }
+        .error-container {
+            text-align: center;
+            background: #20232b;
+            padding: 50px 40px;
+            border-radius: 28px;
+            border: 1px solid #2ecc2e;
+            max-width: 450px;
+            margin: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .lock-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #ff4444;
+            font-size: 1.8rem;
+            margin-bottom: 15px;
+        }
+        p {
+            color: #cbd0d6;
+            margin-bottom: 25px;
+            line-height: 1.5;
+        }
+        .btn-login {
+            display: inline-block;
+            background: #2ecc2e;
+            color: #1a1d24;
+            text-decoration: none;
+            padding: 12px 32px;
+            border-radius: 40px;
+            font-weight: 600;
+            transition: all 0.2s;
+            margin-right: 12px;
+        }
+        .btn-login:hover {
+            background: #27ae60;
+            transform: translateY(-2px);
+        }
+        .btn-home {
+            display: inline-block;
+            background: #3d434d;
+            color: white;
+            text-decoration: none;
+            padding: 12px 24px;
+            border-radius: 40px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn-home:hover {
+            background: #4a515e;
+        }
+        .discord-icon {
+            width: 20px;
+            height: 20px;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="lock-icon">🔒</div>
+        <h1>Доступ запрещён</h1>
+        <p>Эта страница доступна только авторизованным пользователям. Войдите через Discord, чтобы продолжить.</p>
+        <a href="/" class="btn-login">🎮 Войти через Discord</a>
+        <a href="/" class="btn-home">← На главную</a>
+    </div>
+</body>
+</html>
