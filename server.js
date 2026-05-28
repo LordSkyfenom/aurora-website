@@ -37,7 +37,7 @@ const PRODUCT = {
 };
 
 // ============================================
-// 🗄️ БАЗА ДАННЫХ (Neon) С ПЕРЕПОДКЛЮЧЕНИЕМ
+// 🗄️ БАЗА ДАННЫХ (Neon)
 // ============================================
 let pool = null;
 let useDB = false;
@@ -534,7 +534,7 @@ app.get('/admin', (req, res) => {
 // ============================================
 app.get('/api/server-status', async (req, res) => {
     try {
-        const response = await fetch('https://api.mcsrvstat.us/2/213.171.18.129:32471');
+        const response = await fetch('https://api.mcsrvstat.us/2/213.171.18.129:25668');
         const data = await response.json();
         res.json(data);
     } catch {
