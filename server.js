@@ -29,11 +29,7 @@ const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID;
 const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET;
 
 // Supabase PostgreSQL
-const DB_HOST = process.env.DB_HOST;
-const DB_PORT = parseInt(process.env.DB_PORT) || 5432;
-const DB_USER = process.env.DB_USER;
-const DB_PASSWORD = process.env.DB_PASSWORD;
-const DB_NAME = process.env.DB_NAME;
+const DATABASE_URL = process.env.DATABASE_URL;
 
 // Товар
 const PRODUCT = {
@@ -73,28 +69,21 @@ if (!fs.existsSync(FRIENDS_FILE)) writeJSON(FRIENDS_FILE, {});
 if (!fs.existsSync(FORUM_FILE)) writeJSON(FORUM_FILE, []);
 
 // ============================================
-// 🗄️ ПОДКЛЮЧЕНИЕ К PostgreSQL (с резервом)
+// 🗄️ ПОДКЛЮЧЕНИЕ К PostgreSQL
 // ============================================
 let pool = null;
 let useDB = false;
 
 async function initDB() {
-    if (!DB_HOST || !DB_USER || !DB_PASSWORD) {
-        console.log('⚠️ Переменные БД не заданы, используем JSON хранилище');
+    if (!DATABASE_URL) {
+        console.log('⚠️ DATABASE_URL не задана, используем JSON хранилище');
         return;
     }
     
     try {
         pool = new Pool({
-            host: DB_HOST,
-            port: DB_PORT,
-            user: DB_USER,
-            password: DB_PASSWORD,
-            database: DB_NAME,
-            ssl: { rejectUnauthorized: false },
-            max: 5,
-            idleTimeoutMillis: 30000,
-            connectionTimeoutMillis: 10000
+            connectionString: DATABASE_URL,
+            ssl: { rejectUnauthorized: false }
         });
         
         const client = await pool.connect();
@@ -360,25 +349,228 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 });
 
 // ============================================
-// 🏙️ API ГОРОДА (JSON, пока без БД)
+// 📰 API НОВОСТИ
 // ============================================
 
-app.get('/api/cities', (req, res) => {
-    res.json(readJSON(CITIES_FILE));
+app.get('/api/news', async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const res = await pool.query('SELECT * FROM news ORDER BY createdAt DESC');
+            return res.json(res.rows);
+        } catch (err) { console.error('DB news error:', err.message); }
+    }
+    const news = readJSON(NEWS_FILE);
+    res.json(news);
 });
 
-app.post('/api/cities', checkAuth, (req, res) => {
-    const { name, description } = req.body;
+app.post('/api/news', checkAuth, async (req, res) => {
+    const { title, content } = req.body;
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    
+    if (useDB && pool) {
+        try {
+            await pool.query('INSERT INTO news (id, title, content, authorId, authorName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
+                [id, title, content, req.session.userId, req.session.username, createdAt]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB news insert error:', err.message); }
+    }
+    
+    const news = readJSON(NEWS_FILE);
+    news.unshift({ id, title, content, authorId: req.session.userId, authorName: req.session.username, createdAt });
+    writeJSON(NEWS_FILE, news);
+    res.json({ success: true });
+});
+
+app.delete('/api/news/:id', checkAuth, async (req, res) => {
+    if (useDB && pool) {
+        try {
+            await pool.query('DELETE FROM news WHERE id = $1', [req.params.id]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB news delete error:', err.message); }
+    }
+    let news = readJSON(NEWS_FILE);
+    news = news.filter(n => n.id !== req.params.id);
+    writeJSON(NEWS_FILE, news);
+    res.json({ success: true });
+});
+
+// ============================================
+// 🏙️ API ГОРОДА
+// ============================================
+
+app.get('/api/cities', async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const res = await pool.query('SELECT * FROM cities ORDER BY createdAt DESC');
+            return res.json(res.rows);
+        } catch (err) { console.error('DB cities error:', err.message); }
+    }
     const cities = readJSON(CITIES_FILE);
-    cities.push({ id: Date.now(), name, description, ownerId: req.session.userId, ownerName: req.session.username, createdAt: new Date().toISOString() });
+    res.json(cities);
+});
+
+app.post('/api/cities', checkAuth, async (req, res) => {
+    const { name, description } = req.body;
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    
+    if (useDB && pool) {
+        try {
+            await pool.query('INSERT INTO cities (id, name, description, ownerId, ownerName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
+                [id, name, description, req.session.userId, req.session.username, createdAt]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB cities insert error:', err.message); }
+    }
+    
+    const cities = readJSON(CITIES_FILE);
+    cities.push({ id, name, description, ownerId: req.session.userId, ownerName: req.session.username, createdAt });
     writeJSON(CITIES_FILE, cities);
     res.json({ success: true });
 });
 
-app.delete('/api/cities/:id', checkAuth, (req, res) => {
+app.delete('/api/cities/:id', checkAuth, async (req, res) => {
+    if (useDB && pool) {
+        try {
+            await pool.query('DELETE FROM cities WHERE id = $1 AND ownerId = $2', [req.params.id, req.session.userId]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB cities delete error:', err.message); }
+    }
     let cities = readJSON(CITIES_FILE);
-    cities = cities.filter(c => c.id != req.params.id || c.ownerId !== req.session.userId);
+    cities = cities.filter(c => c.id !== req.params.id || c.ownerId !== req.session.userId);
     writeJSON(CITIES_FILE, cities);
+    res.json({ success: true });
+});
+
+// ============================================
+// 👥 API ДРУЗЬЯ
+// ============================================
+
+app.get('/api/friends/data', checkAuth, async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const res = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+            if (res.rows.length === 0) return res.json({ friends: [], messages: [] });
+            return res.json(res.rows[0].data);
+        } catch (err) { console.error('DB friends error:', err.message); }
+    }
+    const data = readJSON(FRIENDS_FILE);
+    res.json(data[req.session.userId] || { friends: [], messages: [] });
+});
+
+app.post('/api/friends/add', checkAuth, async (req, res) => {
+    const { friendId } = req.body;
+    
+    if (useDB && pool) {
+        try {
+            const res = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+            let data = res.rows.length > 0 ? res.rows[0].data : { friends: [], messages: [] };
+            if (!data.friends.includes(friendId)) {
+                data.friends.push(friendId);
+                await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2',
+                    [req.session.userId, data]);
+            }
+            return res.json({ success: true });
+        } catch (err) { console.error('DB friends add error:', err.message); }
+    }
+    
+    const data = readJSON(FRIENDS_FILE);
+    if (!data[req.session.userId]) data[req.session.userId] = { friends: [], messages: [] };
+    if (!data[req.session.userId].friends.includes(friendId)) {
+        data[req.session.userId].friends.push(friendId);
+        if (!data[friendId]) data[friendId] = { friends: [], messages: [] };
+        if (!data[friendId].friends.includes(req.session.userId)) data[friendId].friends.push(req.session.userId);
+        writeJSON(FRIENDS_FILE, data);
+    }
+    res.json({ success: true });
+});
+
+app.post('/api/friends/message', checkAuth, async (req, res) => {
+    const { toId, message } = req.body;
+    const msg = { id: Date.now(), from: req.session.userId, fromName: req.session.username, to: toId, message, timestamp: new Date().toISOString() };
+    
+    if (useDB && pool) {
+        try {
+            let res = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+            let data = res.rows.length > 0 ? res.rows[0].data : { friends: [], messages: [] };
+            if (!data.messages) data.messages = [];
+            data.messages.push(msg);
+            await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [req.session.userId, data]);
+            
+            res = await pool.query('SELECT data FROM friends WHERE userId = $1', [toId]);
+            data = res.rows.length > 0 ? res.rows[0].data : { friends: [], messages: [] };
+            if (!data.messages) data.messages = [];
+            data.messages.push(msg);
+            await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [toId, data]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB friends message error:', err.message); }
+    }
+    
+    let data = readJSON(FRIENDS_FILE);
+    if (!data[req.session.userId]) data[req.session.userId] = { friends: [], messages: [] };
+    if (!data[req.session.userId].messages) data[req.session.userId].messages = [];
+    data[req.session.userId].messages.push(msg);
+    if (!data[toId]) data[toId] = { friends: [], messages: [] };
+    if (!data[toId].messages) data[toId].messages = [];
+    data[toId].messages.push(msg);
+    writeJSON(FRIENDS_FILE, data);
+    res.json({ success: true });
+});
+
+// ============================================
+// 📝 API ФОРУМ
+// ============================================
+
+app.get('/api/forum', async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const res = await pool.query('SELECT * FROM forum ORDER BY createdAt DESC');
+            return res.json(res.rows);
+        } catch (err) { console.error('DB forum error:', err.message); }
+    }
+    const forum = readJSON(FORUM_FILE);
+    res.json(forum);
+});
+
+app.post('/api/forum', checkAuth, async (req, res) => {
+    const { title, content } = req.body;
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    
+    if (useDB && pool) {
+        try {
+            await pool.query('INSERT INTO forum (id, title, content, authorId, authorName, createdAt, answers) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                [id, title, content, req.session.userId, req.session.username, createdAt, '[]']);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB forum insert error:', err.message); }
+    }
+    
+    const forum = readJSON(FORUM_FILE);
+    forum.push({ id, title, content, authorId: req.session.userId, authorName: req.session.username, createdAt, answers: [] });
+    writeJSON(FORUM_FILE, forum);
+    res.json({ success: true });
+});
+
+app.post('/api/forum/:id/answer', checkAuth, async (req, res) => {
+    const { content } = req.body;
+    const answer = { id: Date.now(), authorId: req.session.userId, authorName: req.session.username, content, createdAt: new Date().toISOString() };
+    
+    if (useDB && pool) {
+        try {
+            const res = await pool.query('SELECT answers FROM forum WHERE id = $1', [req.params.id]);
+            if (res.rows.length === 0) return res.status(404).json({ error: 'Пост не найден' });
+            let answers = res.rows[0].answers || [];
+            answers.push(answer);
+            await pool.query('UPDATE forum SET answers = $1 WHERE id = $2', [answers, req.params.id]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB forum answer error:', err.message); }
+    }
+    
+    const forum = readJSON(FORUM_FILE);
+    const post = forum.find(p => p.id === req.params.id);
+    if (!post) return res.status(404).json({ error: 'Пост не найден' });
+    post.answers.push(answer);
+    writeJSON(FORUM_FILE, forum);
     res.json({ success: true });
 });
 
