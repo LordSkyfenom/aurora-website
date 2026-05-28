@@ -43,6 +43,10 @@ const PRODUCT = {
 // ============================================
 const DATA_DIR = path.join(__dirname, 'data');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
+const NEWS_FILE = path.join(DATA_DIR, 'news.json');
+const CITIES_FILE = path.join(DATA_DIR, 'cities.json');
+const FRIENDS_FILE = path.join(DATA_DIR, 'friends.json');
+const FORUM_FILE = path.join(DATA_DIR, 'forum.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 
@@ -54,6 +58,21 @@ function readOrders() {
 function saveOrders(orders) {
     fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
 }
+
+function readData(file, defaultData = []) {
+    if (!fs.existsSync(file)) return defaultData;
+    return JSON.parse(fs.readFileSync(file));
+}
+
+function writeData(file, data) {
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+// Инициализация файлов
+if (!fs.existsSync(NEWS_FILE)) writeData(NEWS_FILE, []);
+if (!fs.existsSync(CITIES_FILE)) writeData(CITIES_FILE, []);
+if (!fs.existsSync(FRIENDS_FILE)) writeData(FRIENDS_FILE, {});
+if (!fs.existsSync(FORUM_FILE)) writeData(FORUM_FILE, []);
 
 // ============================================
 // 🤖 TELEGRAM БОТ (только уведомления)
@@ -69,27 +88,19 @@ if (TELEGRAM_BOT_TOKEN) {
 }
 
 // ============================================
-// 🛡️ RCON ФУНКЦИЯ
+// 🛡️ RCON ФУНКЦИЯ (отключена - ручная выдача)
 // ============================================
-function sendRconCommand(playerName, command) {
-    return new Promise((resolve, reject) => {
-        const rcon = new Rcon(RCON_HOST, RCON_PORT, RCON_PASSWORD);
-        rcon.on('auth', () => {
-            console.log(`🔑 RCON: ${command.replace('{player}', playerName)}`);
-            rcon.send(command.replace('{player}', playerName));
-            rcon.disconnect();
-            resolve(true);
-        });
-        rcon.on('error', reject);
-        rcon.connect();
-    });
-}
-
 async function grantSponsor(playerName) {
-    for (const cmd of PRODUCT.commands) {
-        await sendRconCommand(playerName, cmd);
-    }
-    console.log(`✅ Привилегии выданы игроку ${playerName}`);
+    console.log(`========================================`);
+    console.log(`🎁 НУЖНО ВЫДАТЬ ПРИВИЛЕГИЮ ВРУЧНУЮ:`);
+    console.log(`lp user ${playerName} parent add sponsor`);
+    console.log(`========================================`);
+    
+    const pendingFile = path.join(DATA_DIR, 'pending_commands.txt');
+    const command = `lp user ${playerName} parent add sponsor`;
+    fs.appendFileSync(pendingFile, `[${new Date().toISOString()}] ${command}\n`);
+    
+    return Promise.resolve(true);
 }
 
 // ============================================
@@ -119,7 +130,6 @@ function checkOwner(req, res, next) {
 // 📦 API ЗАКАЗОВ
 // ============================================
 
-// Создание заказа
 app.post('/api/create-order', checkAuth, (req, res) => {
     const { playerName } = req.body;
     if (!playerName) return res.status(400).json({ error: 'Укажите ник' });
@@ -143,7 +153,6 @@ app.post('/api/create-order', checkAuth, (req, res) => {
     res.json({ success: true, orderId: newOrder.id, paymentUrl });
 });
 
-// Получить заказ по ID (для страницы после оплаты)
 app.get('/api/order/:id', (req, res) => {
     const orders = readOrders();
     const order = orders.find(o => o.id === req.params.id);
@@ -151,7 +160,6 @@ app.get('/api/order/:id', (req, res) => {
     res.json(order);
 });
 
-// Подтверждение заказа (пользователь нажал "Я оплатил")
 app.post('/api/confirm-order', checkAuth, (req, res) => {
     const { orderId } = req.body;
     const orders = readOrders();
@@ -164,22 +172,15 @@ app.post('/api/confirm-order', checkAuth, (req, res) => {
     order.status = 'awaiting_confirmation';
     saveOrders(orders);
     
-    // Уведомление админу в Telegram
     if (bot && ADMIN_CHAT_ID) {
         bot.sendMessage(ADMIN_CHAT_ID,
-            `🆕 Новая покупка!\n\n` +
-            `👤 Игрок: ${order.playerName}\n` +
-            `📦 Товар: ${order.product}\n` +
-            `💰 Сумма: ${order.price}₽\n` +
-            `🆔 Заказ: ${order.id}\n\n` +
-            `Зайдите в админ панель для выдачи привилегии.`
+            `🆕 Новая покупка!\n\n👤 Игрок: ${order.playerName}\n📦 Товар: ${order.product}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${order.id}\n\nЗайдите в админ панель для выдачи привилегии.`
         );
     }
     
     res.json({ success: true });
 });
 
-// Отмена заказа (пользователь)
 app.post('/api/cancel-order', checkAuth, (req, res) => {
     const { orderId } = req.body;
     const orders = readOrders();
@@ -197,21 +198,18 @@ app.post('/api/cancel-order', checkAuth, (req, res) => {
 // 👑 АДМИН ПАНЕЛЬ API
 // ============================================
 
-// Получить все заказы со статусом awaiting_confirmation
 app.get('/api/admin/orders', checkAuth, checkOwner, (req, res) => {
     const orders = readOrders();
     const pendingOrders = orders.filter(o => o.status === 'awaiting_confirmation');
     res.json(pendingOrders);
 });
 
-// Получить историю заказов (все выполненные/отменённые)
 app.get('/api/admin/history', checkAuth, checkOwner, (req, res) => {
     const orders = readOrders();
     const history = orders.filter(o => o.status === 'completed' || o.status === 'cancelled');
     res.json(history);
 });
 
-// Выдать привилегию (админ)
 app.post('/api/admin/grant', checkAuth, checkOwner, async (req, res) => {
     const { orderId } = req.body;
     const orders = readOrders();
@@ -226,7 +224,6 @@ app.post('/api/admin/grant', checkAuth, checkOwner, async (req, res) => {
         order.completedAt = new Date().toISOString();
         saveOrders(orders);
         
-        // Уведомление админу
         if (bot && ADMIN_CHAT_ID) {
             bot.sendMessage(ADMIN_CHAT_ID, `✅ Привилегии выданы игроку ${order.playerName} (заказ #${order.id})`);
         }
@@ -237,7 +234,6 @@ app.post('/api/admin/grant', checkAuth, checkOwner, async (req, res) => {
     }
 });
 
-// Отменить заказ (админ)
 app.post('/api/admin/cancel', checkAuth, checkOwner, (req, res) => {
     const { orderId } = req.body;
     const orders = readOrders();
@@ -257,86 +253,42 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, (req, res) => {
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/payment-status', (req, res) => res.sendFile(path.join(__dirname, 'payment-status.html')));
 
-// Админ панель (с проверкой авторизации и прав владельца)
+// Админ панель
 app.get('/admin', (req, res) => {
-    // Проверяем авторизацию
     if (!req.session.userId) {
         return res.send(`
             <!DOCTYPE html>
             <html>
-            <head>
-                <title>Доступ запрещён</title>
-                <style>
-                    body { background: #1a1d24; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: system-ui; color: white; margin: 0; }
-                    .error-box { text-align: center; background: #20232b; padding: 40px; border-radius: 24px; border: 1px solid #ff4444; }
-                    .error-box h1 { color: #ff4444; margin-bottom: 20px; }
-                    .back-link { color: #2ecc2e; text-decoration: none; margin-top: 20px; display: inline-block; }
-                </style>
-            </head>
-            <body>
-                <div class="error-box">
-                    <h1>🔒 Доступ запрещён</h1>
-                    <p>Вы не авторизованы. Войдите через Discord.</p>
-                    <a href="/" class="back-link">← На главную для входа</a>
-                </div>
-            </body>
-            </html>
+            <head><title>Доступ запрещён</title>
+            <style>body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}
+            .error-box{text-align:center;background:#20232b;padding:40px;border-radius:24px;border:1px solid #ff4444}
+            .back-link{color:#2ecc2e;text-decoration:none}</style></head>
+            <body><div class="error-box"><h1>🔒 Доступ запрещён</h1><p>Войдите через Discord.</p><a href="/" class="back-link">← На главную</a></div></body></html>
         `);
     }
-    
-    // Проверяем, что это владелец
     if (req.session.userId !== OWNER_DISCORD_ID) {
         return res.status(403).send(`
             <!DOCTYPE html>
             <html>
-            <head>
-                <title>Доступ запрещён</title>
-                <style>
-                    body { background: #1a1d24; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: system-ui; color: white; margin: 0; }
-                    .error-box { text-align: center; background: #20232b; padding: 40px; border-radius: 24px; border: 1px solid #ff4444; }
-                    .error-box h1 { color: #ff4444; margin-bottom: 20px; }
-                    .back-link { color: #2ecc2e; text-decoration: none; margin-top: 20px; display: inline-block; }
-                </style>
-            </head>
-            <body>
-                <div class="error-box">
-                    <h1>⛔ Нет прав</h1>
-                    <p>У вас нет доступа к админ панели.</p>
-                    <a href="/" class="back-link">← На главную</a>
-                </div>
-            </body>
-            </html>
+            <head><title>Доступ запрещён</title>
+            <style>body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}
+            .error-box{text-align:center;background:#20232b;padding:40px;border-radius:24px;border:1px solid #ff4444}
+            .back-link{color:#2ecc2e;text-decoration:none}</style></head>
+            <body><div class="error-box"><h1>⛔ Нет прав</h1><p>У вас нет доступа.</p><a href="/" class="back-link">← На главную</a></div></body></html>
         `);
     }
-    
-    // Всё ок — отдаём страницу
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
-// ============================================
-// 🧪 ТЕСТОВЫЙ МАРШРУТ
-// ============================================
-app.get('/api/test', (req, res) => res.json({ status: 'ok' }));
+// Страницы новостей, городов, друзей, форума
+app.get('/news', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'news.html')));
+app.get('/cities', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'cities.html')));
+app.get('/friends', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'friends.html')));
+app.get('/forum', checkAuth, (req, res) => res.sendFile(path.join(__dirname, 'views', 'forum.html')));
 
 // ============================================
-// 🌐 API ДЛЯ НОВОСТЕЙ, ГОРОДОВ, ДРУЗЕЙ, ФОРУМА
+// 📰 API НОВОСТИ
 // ============================================
-const NEWS_FILE = path.join(DATA_DIR, 'news.json');
-const CITIES_FILE = path.join(DATA_DIR, 'cities.json');
-const FRIENDS_FILE = path.join(DATA_DIR, 'friends.json');
-const FORUM_FILE = path.join(DATA_DIR, 'forum.json');
-
-function initDataFile(file, defaultData) {
-    if (!fs.existsSync(file)) fs.writeFileSync(file, JSON.stringify(defaultData, null, 2));
-}
-function readData(file) { return JSON.parse(fs.readFileSync(file)); }
-function writeData(file, data) { fs.writeFileSync(file, JSON.stringify(data, null, 2)); }
-
-initDataFile(NEWS_FILE, []);
-initDataFile(CITIES_FILE, []);
-initDataFile(FRIENDS_FILE, {});
-initDataFile(FORUM_FILE, []);
-
 app.get('/api/news', (req, res) => res.json(readData(NEWS_FILE)));
 app.post('/api/news', checkAuth, (req, res) => {
     const { title, content } = req.body;
@@ -352,6 +304,9 @@ app.delete('/api/news/:id', checkAuth, (req, res) => {
     res.json({ success: true });
 });
 
+// ============================================
+// 🏙️ API ГОРОДА
+// ============================================
 app.get('/api/cities', (req, res) => res.json(readData(CITIES_FILE)));
 app.post('/api/cities', checkAuth, (req, res) => {
     const { name, description } = req.body;
@@ -367,6 +322,9 @@ app.delete('/api/cities/:id', checkAuth, (req, res) => {
     res.json({ success: true });
 });
 
+// ============================================
+// 👥 API ДРУЗЬЯ
+// ============================================
 app.get('/api/friends/data', checkAuth, (req, res) => {
     const data = readData(FRIENDS_FILE);
     res.json(data[req.session.userId] || { friends: [], messages: [] });
@@ -395,6 +353,9 @@ app.post('/api/friends/message', checkAuth, (req, res) => {
     res.json({ success: true });
 });
 
+// ============================================
+// 📝 API ФОРУМ
+// ============================================
 app.get('/api/forum', (req, res) => res.json(readData(FORUM_FILE)));
 app.post('/api/forum', checkAuth, (req, res) => {
     const { title, content } = req.body;
@@ -539,6 +500,11 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // ============================================
+// 🧪 ТЕСТОВЫЙ МАРШРУТ
+// ============================================
+app.get('/api/test', (req, res) => res.json({ status: 'ok' }));
+
+// ============================================
 // 🚀 ЗАПУСК
 // ============================================
 const PORT = process.env.PORT || 3001;
@@ -547,8 +513,8 @@ app.listen(PORT, () => {
     console.log('🚀 Aurora Server запущен!');
     console.log(`📍 http://localhost:${PORT}`);
     console.log('='.repeat(50));
-    console.log('🔌 RCON готов');
     console.log(`👑 Владелец ID: ${OWNER_DISCORD_ID || '❌ не указан'}`);
     console.log(`🤖 Telegram бот: ${TELEGRAM_BOT_TOKEN ? '✅' : '❌'}`);
-    console.log(`💳 ЮMoney кошелёк: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
+    console.log(`💳 ЮMoney: ${YOOMONEY_WALLET ? '✅' : '❌'}`);
+    console.log(`📰 Страницы: /news, /cities, /friends, /forum доступны после входа`);
 });
