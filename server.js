@@ -47,29 +47,26 @@ const PRODUCT = {
 let pool;
 
 async function initDB() {
-    try {
-        pool = mysql.createPool({
-            host: DB_HOST,
-            port: DB_PORT,
-            user: DB_USER,
-            password: DB_PASSWORD,
-            database: DB_NAME,
-            waitForConnections: true,
-            connectionLimit: 10,
-            queueLimit: 0
-        });
-        console.log('✅ База данных MySQL подключена (Beget)');
-        
-        // Проверка подключения
-        const [rows] = await pool.execute('SELECT 1');
-        console.log('✅ Проверка БД успешна');
-    } catch (error) {
-        console.error('❌ Ошибка подключения к БД:', error.message);
-    }
+    pool = mysql.createPool({
+        host: DB_HOST,
+        port: DB_PORT,
+        user: DB_USER,
+        password: DB_PASSWORD,
+        database: DB_NAME,
+        waitForConnections: true,
+        connectionLimit: 5,
+        queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000,
+        connectTimeout: 10000
+    });
+    
+    const [rows] = await pool.execute('SELECT 1');
+    console.log('✅ База данных MySQL подключена (Beget)');
 }
 
 // ============================================
-// 🤖 TELEGRAM БОТ (только уведомления)
+// 🤖 TELEGRAM БОТ
 // ============================================
 let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
@@ -86,13 +83,6 @@ async function grantSponsor(playerName) {
     console.log(`🎁 НУЖНО ВЫДАТЬ ПРИВИЛЕГИЮ ВРУЧНУЮ:`);
     console.log(`lp user ${playerName} parent add sponsor`);
     console.log(`========================================`);
-    
-    // Сохраняем в файл для истории
-    const pendingFile = path.join(__dirname, 'data', 'pending_commands.txt');
-    const dataDir = path.join(__dirname, 'data');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
-    fs.appendFileSync(pendingFile, `[${new Date().toISOString()}] lp user ${playerName} parent add sponsor\n`);
-    
     return Promise.resolve(true);
 }
 
@@ -158,9 +148,7 @@ app.post('/api/confirm-order', checkAuth, async (req, res) => {
     await pool.execute('UPDATE orders SET status = ? WHERE id = ?', ['awaiting_confirmation', orderId]);
     
     if (bot && ADMIN_CHAT_ID) {
-        bot.sendMessage(ADMIN_CHAT_ID,
-            `🆕 Новая покупка!\n\n👤 Игрок: ${order.playerName}\n📦 Товар: ${order.product}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}\n\nЗайдите в админ панель для выдачи.`
-        );
+        bot.sendMessage(ADMIN_CHAT_ID, `🆕 Новая покупка!\n👤 Игрок: ${order.playerName}\n💰 Сумма: ${order.price}₽\n🆔 Заказ: ${orderId}`);
     }
     
     res.json({ success: true });
@@ -298,14 +286,16 @@ app.post('/api/friends/message', checkAuth, async (req, res) => {
     let data = rows.length > 0 ? rows[0].data : { friends: [], messages: [] };
     if (!data.messages) data.messages = [];
     data.messages.push(msg);
-    await pool.execute('INSERT INTO friends (userId, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = ?', [req.session.userId, JSON.stringify(data), JSON.stringify(data)]);
+    await pool.execute('INSERT INTO friends (userId, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = ?',
+        [req.session.userId, JSON.stringify(data), JSON.stringify(data)]);
     
     // Сообщение получателю
     [rows] = await pool.execute('SELECT data FROM friends WHERE userId = ?', [toId]);
     data = rows.length > 0 ? rows[0].data : { friends: [], messages: [] };
     if (!data.messages) data.messages = [];
     data.messages.push(msg);
-    await pool.execute('INSERT INTO friends (userId, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = ?', [toId, JSON.stringify(data), JSON.stringify(data)]);
+    await pool.execute('INSERT INTO friends (userId, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = ?',
+        [toId, JSON.stringify(data), JSON.stringify(data)]);
     
     res.json({ success: true });
 });
