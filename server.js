@@ -6,6 +6,10 @@ const https = require('https');
 const session = require('express-session');
 const fs = require('fs');
 const { Pool } = require('pg');
+const dns = require('dns');
+
+// Принудительно используем IPv4 для подключения к БД
+dns.setDefaultResultOrder('ipv4first');
 
 const TelegramBot = require('node-telegram-bot-api');
 
