@@ -30,6 +30,10 @@ const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET;
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
+// IP и порт Minecraft сервера
+const SERVER_IP = '213.171.18.141';
+const SERVER_PORT = 32803;
+
 const PRODUCT = {
     name: 'Поддержка сервера 🍪',
     price: 200,
@@ -500,14 +504,22 @@ app.get('/admin', (req, res) => {
 });
 
 // ============================================
-// 📊 СТАТУСЫ
+// 📊 СТАТУСЫ (с альтернативным API)
 // ============================================
 app.get('/api/server-status', async (req, res) => {
     try {
-        const response = await fetch('https://api.mcsrvstat.us/2/213.171.18.141:32803');
+        // Используем альтернативный API mineatar.io
+        const response = await fetch(`https://api.mineatar.io/status/${SERVER_IP}:${SERVER_PORT}`);
         const data = await response.json();
-        res.json(data);
-    } catch {
+        res.json({
+            online: data.online || false,
+            players: { 
+                online: data.players?.online || 0, 
+                max: data.players?.max || 99 
+            }
+        });
+    } catch (error) {
+        console.log('Ошибка получения статуса:', error.message);
         res.json({ online: false, players: { online: 0, max: 99 } });
     }
 });
