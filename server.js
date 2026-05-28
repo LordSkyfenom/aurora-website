@@ -37,14 +37,10 @@ const PRODUCT = {
 };
 
 // ============================================
-// 💾 ХРАНИЛИЩЕ (JSON резерв)
+// 💾 JSON ХРАНИЛИЩЕ (только для резерва)
 // ============================================
 const DATA_DIR = path.join(__dirname, 'data');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
-const NEWS_FILE = path.join(DATA_DIR, 'news.json');
-const CITIES_FILE = path.join(DATA_DIR, 'cities.json');
-const FRIENDS_FILE = path.join(DATA_DIR, 'friends.json');
-const FORUM_FILE = path.join(DATA_DIR, 'forum.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 
@@ -58,10 +54,6 @@ function writeJSON(file, data) {
 }
 
 if (!fs.existsSync(ORDERS_FILE)) writeJSON(ORDERS_FILE, []);
-if (!fs.existsSync(NEWS_FILE)) writeJSON(NEWS_FILE, []);
-if (!fs.existsSync(CITIES_FILE)) writeJSON(CITIES_FILE, []);
-if (!fs.existsSync(FRIENDS_FILE)) writeJSON(FRIENDS_FILE, {});
-if (!fs.existsSync(FORUM_FILE)) writeJSON(FORUM_FILE, []);
 
 // ============================================
 // 🗄️ БАЗА ДАННЫХ (Neon)
@@ -89,13 +81,18 @@ async function initDB() {
 }
 
 // ============================================
-// 🤖 TELEGRAM БОТ
+// 🤖 TELEGRAM БОТ (webhook mode)
 // ============================================
 let bot = null;
 if (TELEGRAM_BOT_TOKEN) {
-    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    console.log('🤖 Telegram бот запущен');
+    bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
+    console.log('🤖 Telegram бот создан (webhook mode)');
 }
+
+app.post('/webhook/telegram', express.json(), (req, res) => {
+    console.log('📥 Получен webhook от Telegram');
+    res.status(200).send('OK');
+});
 
 // ============================================
 // 🛡️ RCON
@@ -135,7 +132,6 @@ app.use(session({
     cookie: { secure: false, httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 24 * 7 }
 }));
 
-// Красивая страница ошибки
 function checkAuth(req, res, next) {
     if (req.session.userId) return next();
     res.status(401).sendFile(path.join(__dirname, 'unauthorized.html'));
@@ -143,27 +139,7 @@ function checkAuth(req, res, next) {
 
 function checkOwner(req, res, next) {
     if (req.session.userId === OWNER_DISCORD_ID) return next();
-    res.status(403).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Нет прав - Aurora</title>
-            <style>
-                body{background:#1a1d24;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui;color:white;margin:0}
-                .error-box{text-align:center;background:#20232b;padding:40px;border-radius:28px;border:1px solid #ff4444;max-width:400px}
-                h1{color:#ff4444;margin-bottom:15px}
-                .back-link{color:#2ecc2e;text-decoration:none;display:inline-block;margin-top:20px}
-            </style>
-        </head>
-        <body>
-            <div class="error-box">
-                <h1>⛔ Нет прав</h1>
-                <p>У вас нет доступа к этой странице.</p>
-                <a href="/" class="back-link">← На главную</a>
-            </div>
-        </body>
-        </html>
-    `);
+    res.status(403).sendFile(path.join(__dirname, 'forbidden.html'));
 }
 
 // ============================================
@@ -250,8 +226,6 @@ app.post('/api/create-order', checkAuth, async (req, res) => {
     const { playerName } = req.body;
     if (!playerName) return res.status(400).json({ error: 'Укажите ник' });
     
-    console.log(`📝 Создание заказа, userId: ${req.session.userId}`);
-    
     const orderId = Date.now().toString();
     const newOrder = {
         id: orderId,
@@ -279,25 +253,10 @@ app.get('/api/order/:id', async (req, res) => {
 
 app.post('/api/confirm-order', checkAuth, async (req, res) => {
     const { orderId } = req.body;
-    
-    console.log(`🔍 Подтверждение заказа ${orderId}, userId: ${req.session.userId}`);
-    
     const order = await getOrder(orderId);
-    if (!order) {
-        console.log(`❌ Заказ ${orderId} не найден`);
-        return res.status(404).json({ error: 'Заказ не найден' });
-    }
-    
-    console.log(`Заказ userId: ${order.userId}`);
-    console.log(`Заказ status: ${order.status}`);
-    
-    if (order.userId !== req.session.userId) {
-        console.log(`❌ Не ваш заказ: ${order.userId} !== ${req.session.userId}`);
-        return res.status(403).json({ error: 'Не ваш заказ' });
-    }
-    if (order.status !== 'pending') {
-        return res.status(400).json({ error: 'Заказ уже обработан' });
-    }
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    if (order.userId !== req.session.userId) return res.status(403).json({ error: 'Не ваш заказ' });
+    if (order.status !== 'pending') return res.status(400).json({ error: 'Заказ уже обработан' });
     
     await updateOrderStatus(orderId, 'awaiting_confirmation');
     
@@ -349,94 +308,189 @@ app.post('/api/admin/cancel', checkAuth, checkOwner, async (req, res) => {
 });
 
 // ============================================
-// 📰 НОВОСТИ (JSON)
+// 📰 НОВОСТИ (PostgreSQL)
 // ============================================
-app.get('/api/news', (req, res) => res.json(readJSON(NEWS_FILE)));
-app.post('/api/news', checkAuth, (req, res) => {
+app.get('/api/news', async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT * FROM news ORDER BY createdAt DESC');
+            return res.json(result.rows);
+        } catch (err) { console.error('DB news error:', err.message); }
+    }
+    res.json([]);
+});
+
+app.post('/api/news', checkAuth, async (req, res) => {
     const { title, content } = req.body;
-    const news = readJSON(NEWS_FILE);
-    news.unshift({ id: Date.now(), title, content, authorId: req.session.userId, authorName: req.session.username, createdAt: new Date().toISOString() });
-    writeJSON(NEWS_FILE, news);
-    res.json({ success: true });
-});
-app.delete('/api/news/:id', checkAuth, (req, res) => {
-    let news = readJSON(NEWS_FILE);
-    news = news.filter(n => n.id != req.params.id);
-    writeJSON(NEWS_FILE, news);
-    res.json({ success: true });
-});
-
-// ============================================
-// 🏙️ ГОРОДА (JSON)
-// ============================================
-app.get('/api/cities', (req, res) => res.json(readJSON(CITIES_FILE)));
-app.post('/api/cities', checkAuth, (req, res) => {
-    const { name, description } = req.body;
-    const cities = readJSON(CITIES_FILE);
-    cities.push({ id: Date.now(), name, description, ownerId: req.session.userId, ownerName: req.session.username, createdAt: new Date().toISOString() });
-    writeJSON(CITIES_FILE, cities);
-    res.json({ success: true });
-});
-app.delete('/api/cities/:id', checkAuth, (req, res) => {
-    let cities = readJSON(CITIES_FILE);
-    cities = cities.filter(c => c.id != req.params.id || c.ownerId !== req.session.userId);
-    writeJSON(CITIES_FILE, cities);
-    res.json({ success: true });
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    
+    if (useDB && pool) {
+        try {
+            await pool.query(
+                'INSERT INTO news (id, title, content, authorId, authorName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
+                [id, title, content, req.session.userId, req.session.username, createdAt]
+            );
+            return res.json({ success: true });
+        } catch (err) { console.error('DB news insert error:', err.message); }
+    }
+    res.status(500).json({ error: 'Ошибка сохранения' });
 });
 
-// ============================================
-// 👥 ДРУЗЬЯ (JSON)
-// ============================================
-app.get('/api/friends/data', checkAuth, (req, res) => {
-    const data = readJSON(FRIENDS_FILE);
-    res.json(data[req.session.userId] || { friends: [], messages: [] });
-});
-app.post('/api/friends/add', checkAuth, (req, res) => {
-    const { friendId } = req.body;
-    const data = readJSON(FRIENDS_FILE);
-    if (!data[req.session.userId]) data[req.session.userId] = { friends: [], messages: [] };
-    if (!data[req.session.userId].friends.includes(friendId)) {
-        data[req.session.userId].friends.push(friendId);
-        if (!data[friendId]) data[friendId] = { friends: [], messages: [] };
-        if (!data[friendId].friends.includes(req.session.userId)) data[friendId].friends.push(req.session.userId);
-        writeJSON(FRIENDS_FILE, data);
+app.delete('/api/news/:id', checkAuth, async (req, res) => {
+    if (useDB && pool) {
+        try {
+            await pool.query('DELETE FROM news WHERE id = $1', [req.params.id]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB news delete error:', err.message); }
     }
     res.json({ success: true });
 });
-app.post('/api/friends/message', checkAuth, (req, res) => {
-    const { toId, message } = req.body;
-    const data = readJSON(FRIENDS_FILE);
-    const msg = { id: Date.now(), from: req.session.userId, fromName: req.session.username, to: toId, message, timestamp: new Date().toISOString() };
-    if (!data[req.session.userId]) data[req.session.userId] = { friends: [], messages: [] };
-    if (!data[req.session.userId].messages) data[req.session.userId].messages = [];
-    data[req.session.userId].messages.push(msg);
-    if (!data[toId]) data[toId] = { friends: [], messages: [] };
-    if (!data[toId].messages) data[toId].messages = [];
-    data[toId].messages.push(msg);
-    writeJSON(FRIENDS_FILE, data);
+
+// ============================================
+// 🏙️ ГОРОДА (PostgreSQL)
+// ============================================
+app.get('/api/cities', async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT * FROM cities ORDER BY createdAt DESC');
+            return res.json(result.rows);
+        } catch (err) { console.error('DB cities error:', err.message); }
+    }
+    res.json([]);
+});
+
+app.post('/api/cities', checkAuth, async (req, res) => {
+    const { name, description } = req.body;
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    
+    if (useDB && pool) {
+        try {
+            await pool.query(
+                'INSERT INTO cities (id, name, description, ownerId, ownerName, createdAt) VALUES ($1, $2, $3, $4, $5, $6)',
+                [id, name, description, req.session.userId, req.session.username, createdAt]
+            );
+            return res.json({ success: true });
+        } catch (err) { console.error('DB cities insert error:', err.message); }
+    }
+    res.status(500).json({ error: 'Ошибка сохранения' });
+});
+
+app.delete('/api/cities/:id', checkAuth, async (req, res) => {
+    if (useDB && pool) {
+        try {
+            await pool.query('DELETE FROM cities WHERE id = $1 AND ownerId = $2', [req.params.id, req.session.userId]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB cities delete error:', err.message); }
+    }
     res.json({ success: true });
 });
 
 // ============================================
-// 📝 ФОРУМ (JSON)
+// 👥 ДРУЗЬЯ (PostgreSQL)
 // ============================================
-app.get('/api/forum', (req, res) => res.json(readJSON(FORUM_FILE)));
-app.post('/api/forum', checkAuth, (req, res) => {
-    const { title, content } = req.body;
-    const forum = readJSON(FORUM_FILE);
-    forum.push({ id: Date.now(), title, content, authorId: req.session.userId, authorName: req.session.username, createdAt: new Date().toISOString(), answers: [] });
-    writeJSON(FORUM_FILE, forum);
+app.get('/api/friends/data', checkAuth, async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+            if (result.rows.length === 0) return res.json({ friends: [], messages: [] });
+            return res.json(result.rows[0].data);
+        } catch (err) { console.error('DB friends error:', err.message); }
+    }
+    res.json({ friends: [], messages: [] });
+});
+
+app.post('/api/friends/add', checkAuth, async (req, res) => {
+    const { friendId } = req.body;
+    
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+            let data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
+            if (!data.friends.includes(friendId)) {
+                data.friends.push(friendId);
+                await pool.query(
+                    'INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2',
+                    [req.session.userId, data]
+                );
+            }
+            return res.json({ success: true });
+        } catch (err) { console.error('DB friends add error:', err.message); }
+    }
     res.json({ success: true });
 });
-app.post('/api/forum/:id/answer', checkAuth, (req, res) => {
+
+app.post('/api/friends/message', checkAuth, async (req, res) => {
+    const { toId, message } = req.body;
+    const msg = { id: Date.now(), from: req.session.userId, fromName: req.session.username, to: toId, message, timestamp: new Date().toISOString() };
+    
+    if (useDB && pool) {
+        try {
+            // Сообщение отправителю
+            let result = await pool.query('SELECT data FROM friends WHERE userId = $1', [req.session.userId]);
+            let data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
+            if (!data.messages) data.messages = [];
+            data.messages.push(msg);
+            await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [req.session.userId, data]);
+            
+            // Сообщение получателю
+            result = await pool.query('SELECT data FROM friends WHERE userId = $1', [toId]);
+            data = result.rows.length > 0 ? result.rows[0].data : { friends: [], messages: [] };
+            if (!data.messages) data.messages = [];
+            data.messages.push(msg);
+            await pool.query('INSERT INTO friends (userId, data) VALUES ($1, $2) ON CONFLICT (userId) DO UPDATE SET data = $2', [toId, data]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB friends message error:', err.message); }
+    }
+    res.json({ success: true });
+});
+
+// ============================================
+// 📝 ФОРУМ (PostgreSQL)
+// ============================================
+app.get('/api/forum', async (req, res) => {
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT * FROM forum ORDER BY createdAt DESC');
+            return res.json(result.rows);
+        } catch (err) { console.error('DB forum error:', err.message); }
+    }
+    res.json([]);
+});
+
+app.post('/api/forum', checkAuth, async (req, res) => {
+    const { title, content } = req.body;
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    
+    if (useDB && pool) {
+        try {
+            await pool.query(
+                'INSERT INTO forum (id, title, content, authorId, authorName, createdAt, answers) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                [id, title, content, req.session.userId, req.session.username, createdAt, '[]']
+            );
+            return res.json({ success: true });
+        } catch (err) { console.error('DB forum insert error:', err.message); }
+    }
+    res.status(500).json({ error: 'Ошибка сохранения' });
+});
+
+app.post('/api/forum/:id/answer', checkAuth, async (req, res) => {
     const { content } = req.body;
-    const forum = readJSON(FORUM_FILE);
-    const post = forum.find(p => p.id == req.params.id);
-    if (post) {
-        post.answers.push({ id: Date.now(), authorId: req.session.userId, authorName: req.session.username, content, createdAt: new Date().toISOString() });
-        writeJSON(FORUM_FILE, forum);
-        res.json({ success: true });
-    } else res.status(404).json({ error: 'Пост не найден' });
+    const answer = { id: Date.now(), authorId: req.session.userId, authorName: req.session.username, content, createdAt: new Date().toISOString() };
+    
+    if (useDB && pool) {
+        try {
+            const result = await pool.query('SELECT answers FROM forum WHERE id = $1', [req.params.id]);
+            if (result.rows.length === 0) return res.status(404).json({ error: 'Пост не найден' });
+            let answers = result.rows[0].answers || [];
+            answers.push(answer);
+            await pool.query('UPDATE forum SET answers = $1 WHERE id = $2', [answers, req.params.id]);
+            return res.json({ success: true });
+        } catch (err) { console.error('DB forum answer error:', err.message); }
+    }
+    res.status(500).json({ error: 'Ошибка' });
 });
 
 // ============================================
@@ -651,6 +705,17 @@ const PORT = process.env.PORT || 3001;
 
 async function start() {
     await initDB();
+    
+    if (bot && TELEGRAM_BOT_TOKEN) {
+        const webhookUrl = `https://aurora-mc.onrender.com/webhook/telegram`;
+        try {
+            await bot.setWebHook(webhookUrl);
+            console.log(`✅ Webhook установлен: ${webhookUrl}`);
+        } catch (err) {
+            console.error(`❌ Ошибка webhook: ${err.message}`);
+        }
+    }
+    
     app.listen(PORT, () => {
         console.log('='.repeat(50));
         console.log('🚀 Сервер запущен');
