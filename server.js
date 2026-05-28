@@ -42,11 +42,23 @@ const PRODUCT = {
 };
 
 // ============================================
-// 🗄️ ПОДКЛЮЧЕНИЕ К БД (с увеличенным wait_timeout)
+// 🗄️ ПОДКЛЮЧЕНИЕ К БД (с отладкой)
 // ============================================
 let pool;
 
 async function initDB() {
+    console.log('📡 Попытка подключения к MySQL...');
+    console.log(`DB_HOST: ${DB_HOST}`);
+    console.log(`DB_PORT: ${DB_PORT}`);
+    console.log(`DB_NAME: ${DB_NAME}`);
+    console.log(`DB_USER: ${DB_USER}`);
+    console.log(`DB_PASSWORD: ${DB_PASSWORD ? '***' : '❌ не задан'}`);
+    
+    if (!DB_HOST || !DB_USER || !DB_PASSWORD) {
+        console.error('❌ Ошибка: не все переменные БД заданы!');
+        process.exit(1);
+    }
+    
     pool = mysql.createPool({
         host: DB_HOST,
         port: DB_PORT,
@@ -61,14 +73,18 @@ async function initDB() {
         connectTimeout: 10000
     });
     
-    // Увеличиваем wait_timeout для сессии (решение от поддержки Beget)
-    const connection = await pool.getConnection();
-    await connection.query('SET SESSION wait_timeout = 28800');
-    await connection.query('SET SESSION interactive_timeout = 28800');
-    connection.release();
-    
-    const [rows] = await pool.execute('SELECT 1');
-    console.log('✅ База данных MySQL подключена (Beget)');
+    try {
+        const connection = await pool.getConnection();
+        await connection.query('SET SESSION wait_timeout = 28800');
+        await connection.query('SET SESSION interactive_timeout = 28800');
+        connection.release();
+        
+        const [rows] = await pool.execute('SELECT 1');
+        console.log('✅ База данных MySQL подключена (Beget)');
+    } catch (err) {
+        console.error('❌ Ошибка подключения к БД:', err.message);
+        throw err;
+    }
 }
 
 // ============================================
@@ -489,7 +505,12 @@ app.get('/auth/callback', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 
 async function start() {
-    await initDB();
+    try {
+        await initDB();
+    } catch (err) {
+        console.error('❌ Критическая ошибка: не удалось подключиться к БД');
+        process.exit(1);
+    }
     app.listen(PORT, () => {
         console.log('='.repeat(50));
         console.log('🚀 Aurora Server запущен!');
